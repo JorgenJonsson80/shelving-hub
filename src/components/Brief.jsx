@@ -108,6 +108,23 @@ export default function Brief() {
       .catch(e => { setErr("API-fel: " + e.message); setLoading(false); });
   };
 
+  const alerts = parsed ? parsed.rows.flatMap(r => {
+    const res = [];
+    if (r.gap < -1.5) res.push({ level: "critical", msg: r.kbana + ": gap " + r.gap.toFixed(1) + "h" });
+    else if (r.gap < -0.5) res.push({ level: "warning", msg: r.kbana + ": gap " + r.gap.toFixed(1) + "h" });
+    if (r.scannat != null) {
+      const pct = Math.round(r.scannat * 100);
+      if (pct < 60) res.push({ level: "critical", msg: r.kbana + ": scan " + pct + "%" });
+      else if (pct < 75) res.push({ level: "warning", msg: r.kbana + ": scan " + pct + "%" });
+    }
+    return res;
+  }) : [];
+  const hasCritical = alerts.some(a => a.level === "critical");
+  const copyAlerts = () => {
+    const lines = alerts.map(a => (a.level === "critical" ? "KRITISK" : "VARNING") + ": " + a.msg);
+    navigator.clipboard.writeText(lines.join("\n")).catch(() => {});
+  };
+
   return (
     <div className="dashboard-page">
       <PageHeader
@@ -146,6 +163,20 @@ export default function Brief() {
               <MetricCard key={s.l} label={s.l} value={s.v} />
             ))}
           </MetricGrid>
+
+          {alerts.length > 0 && (
+            <div className={"alert-panel" + (hasCritical ? "" : " alert-panel--warn")}>
+              <div className="alert-panel__head">
+                <span>{hasCritical ? "KRITISKA AVVIKELSER" : "VARNINGAR"}</span>
+                <button className="alert-panel__copy" onClick={copyAlerts}>KOPIERA</button>
+              </div>
+              <div className="alert-panel__body">
+                {alerts.map((a, i) => (
+                  <span key={i} className={"alert-item alert-item--" + a.level}>{a.msg}</span>
+                ))}
+              </div>
+            </div>
+          )}
 
           <Panel className="data-panel" flush>
             <DataTable headers={[

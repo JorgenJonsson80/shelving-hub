@@ -67,6 +67,35 @@ function readFlow(R, coords) {
   return { iko: g(coords.iko), pavag: g(coords.pavag), klart: g(coords.klart), total: g(coords.total) };
 }
 
+const normKbana = s => String(s).replace(/[-\s]/g, "").toUpperCase();
+
+function parseStaffingFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array" });
+        const sheet = wb.Sheets["K-BANA"];
+        if (!sheet) throw new Error("Ingen K-BANA-flik — är det rätt fil?");
+        const R = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+        const hi = R.findIndex(r => String(r[1]).trim().toUpperCase() === "K-BANA");
+        if (hi === -1) throw new Error("Hittade inte K-BANA-rubriken");
+        const rows = [];
+        for (let i = hi + 1; i < R.length; i++) {
+          const r = R[i];
+          const kbana = String(r[1] || "").trim();
+          if (!kbana || kbana.toUpperCase() === "TOTAL") break;
+          rows.push({ kbana, p1: +r[2]||0, p2: +r[3]||0, p3: +r[4]||0, p8: +r[5]||0, bemanning: +r[7]||0 });
+        }
+        if (!rows.length) throw new Error("Ingen bemanningsdata hittades");
+        resolve(rows);
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 function parseLive(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -139,11 +168,22 @@ export default function Live() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [drag, setDrag] = useState(false);
+  const [staffing, setStaffing] = useState(null);
+  const [staffErr, setStaffErr] = useState(null);
 
   const handleFile = (f) => {
     setErr(null);
     parseLive(f).then(setData).catch(e => setErr(e.message));
   };
+
+  const handleStaffingFile = (f) => {
+    setStaffErr(null);
+    parseStaffingFile(f).then(setStaffing).catch(e => setStaffErr(e.message));
+  };
+
+  const staffingMap = staffing
+    ? Object.fromEntries(staffing.map(r => [normKbana(r.kbana), r]))
+    : null;
 
   return (
     <div className="dashboard-page">
@@ -162,12 +202,19 @@ export default function Live() {
                 <input type="file" accept=".xlsx" className="visually-hidden-input"
                   onChange={e => { if (e.target.files[0]) handleFile(e.target.files[0]); }} />
               </label>
+              {" "}·{" "}
+              <label className="file-meta__change" style={staffing ? { color: "var(--green)" } : undefined}>
+                {staffing ? "Bemanning ✓" : "+ Bemanning"}
+                <input type="file" accept=".xlsx" className="visually-hidden-input"
+                  onChange={e => { if (e.target.files[0]) handleStaffingFile(e.target.files[0]); }} />
+              </label>
             </div>
           </div>
         )}
       />
 
       {err && <Alert>{err}</Alert>}
+      {staffErr && <Alert>{staffErr}</Alert>}
 
       {!data && (
         <div
@@ -197,6 +244,19 @@ export default function Live() {
                   </div>
                   <StatusPill {...kb.pafyll} />
                 </div>
+                {(() => {
+                  const s = staffingMap?.[normKbana(kb.kbana)];
+                  if (!s) return null;
+                  return (
+                    <div className="kbana-card__staffing">
+                      {s.p1 > 0 && <span className="staffing-shift">P1</span>}
+                      {s.p2 > 0 && <span className="staffing-shift">P2</span>}
+                      {s.p3 > 0 && <span className="staffing-shift">P3</span>}
+                      {s.p8 > 0 && <span className="staffing-shift">P8</span>}
+                      <span className="staffing-total">{s.bemanning} pers</span>
+                    </div>
+                  );
+                })()}
                 <div className="kbana-card__body">
                   <div className="block-label">
                     {kb.isPL ? "PALLAR" : "PÅFYLLNINGAR"}

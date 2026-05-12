@@ -1,14 +1,16 @@
 import { useState } from "react";
 import Live from "./components/Live";
+import Bemanning from "./components/Bemanning";
 import Brief from "./components/Brief";
 import Raknare from "./components/Raknare";
 import Historik from "./components/Historik";
 
 const TABS = [
-  { id: "live",     label: "Live",        Component: Live,     dot: true },
-  { id: "brief",    label: "Daily Brief", Component: Brief },
-  { id: "rakna",    label: "Räknare",     Component: Raknare },
-  { id: "historik", label: "Historik",    Component: Historik },
+  { id: "live",      label: "Live",        Component: Live,     dot: true },
+  { id: "bemanning", label: "Bemanning",   Component: Bemanning },
+  { id: "brief",     label: "Daily Brief", Component: Brief },
+  { id: "rakna",     label: "Räknare",     Component: Raknare },
+  { id: "historik",  label: "Historik",    Component: Historik },
 ];
 
 export default function App() {
