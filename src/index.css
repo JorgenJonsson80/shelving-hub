@@ -1028,6 +1028,34 @@ body {
   font-weight: 700;
 }
 
+/* ── Historik trend view ─────────────────────────────────── */
+
+.trend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.trend-metric {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.trend-metric__label {
+  min-width: 36px;
+  color: var(--dim);
+  font: 800 9px var(--font-mono);
+  letter-spacing: 1px;
+}
+
+.trend-metric__value {
+  min-width: 42px;
+  text-align: right;
+  font: 700 12px var(--font-mono);
+}
+
 /* ── Brief AI-panel ──────────────────────────────────────── */
 
 .brief-text {

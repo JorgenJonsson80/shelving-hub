@@ -87,6 +87,76 @@ function parseDailyFile(file) {
   });
 }
 
+function Sparkline({ values, color, w = 80, h = 28 }) {
+  if (!values || values.length < 2) return <span style={{ display: "inline-block", width: w, height: h }} />;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const pts = values.map((v, i) => [
+    (i / (values.length - 1)) * w,
+    h - 2 - ((v - min) / range) * (h - 4),
+  ]);
+  const d = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const [lx, ly] = pts[pts.length - 1];
+  return (
+    <svg width={w} height={h} style={{ overflow: "visible", flexShrink: 0 }}>
+      <path d={d} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={lx.toFixed(1)} cy={ly.toFixed(1)} r="2.5" fill={color} />
+    </svg>
+  );
+}
+
+function TrendView({ history, selMonth, monthDays }) {
+  const trends = useMemo(() => {
+    if (!selMonth || !history[selMonth]) return [];
+    const byK = {};
+    for (const day of monthDays) {
+      const d = history[selMonth]?.[day];
+      if (!d) continue;
+      for (const r of d.rows) {
+        if (!byK[r.kbana]) byK[r.kbana] = { prest: [], gap: [] };
+        byK[r.kbana].prest.push(r.prest);
+        byK[r.kbana].gap.push(r.gap);
+      }
+    }
+    return KBANA_ORDER.filter(k => byK[k]).map(k => ({ kbana: k, ...byK[k] }));
+  }, [history, selMonth, monthDays]);
+
+  if (!trends.length) return null;
+
+  return (
+    <div className="anim-fade-up trend-grid">
+      {trends.map(k => {
+        const latestPrest = k.prest[k.prest.length - 1];
+        const latestGap   = k.gap[k.gap.length - 1];
+        const prestColor  = latestPrest < 1 ? C.green : C.red;
+        const gapColor    = latestGap > 0.5 ? C.green : latestGap < -0.5 ? C.red : C.yellow;
+        return (
+          <div key={k.kbana} className="section-card">
+            <div className="section-card__header">{k.kbana}</div>
+            <div className="section-card__body">
+              <div className="trend-metric">
+                <span className="trend-metric__label">PREST</span>
+                <Sparkline values={k.prest} color={prestColor} />
+                <span className="trend-metric__value" style={{ color: prestColor }}>
+                  {Math.round(latestPrest * 100)}%
+                </span>
+              </div>
+              <div className="trend-metric">
+                <span className="trend-metric__label">GAP</span>
+                <Sparkline values={k.gap} color={gapColor} />
+                <span className="trend-metric__value" style={{ color: gapColor }}>
+                  {latestGap > 0 ? "+" : ""}{latestGap.toFixed(1)}h
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function DagTabell({ rows }) {
   return (
     <DataTable headers={[
@@ -311,6 +381,12 @@ export default function Historik() {
                   >
                     Månadssnitt
                   </button>
+                  <button
+                    className={"historik__snitt-btn" + (view === "trend" ? " is-active" : "")}
+                    onClick={() => setView("trend")}
+                  >
+                    Trender
+                  </button>
                   <ActionButton
                     style={{ marginLeft: "auto" }}
                     onClick={() => {
@@ -359,6 +435,10 @@ export default function Historik() {
                   <Panel key="snitt" title={"MÅNADSSNITT — " + fmtMonth(selMonth) + " (" + monthDays.length + " dagar)"} accent="blue" flush>
                     <SnitTabell agg={monthAgg} />
                   </Panel>
+                )}
+
+                {view === "trend" && (
+                  <TrendView key="trend" history={history} selMonth={selMonth} monthDays={monthDays} />
                 )}
               </>
             )}

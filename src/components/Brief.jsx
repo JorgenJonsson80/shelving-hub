@@ -183,9 +183,14 @@ export default function Brief() {
           </Panel>
 
           {!brief && (
-            <ActionButton onClick={generateBrief} disabled={loading} variant="primary" full>
-              {loading ? "Analyserar..." : "Generera morgonbriefing"}
-            </ActionButton>
+            <>
+              <ActionButton onClick={generateBrief} disabled={loading} variant="primary" full>
+                {loading ? "Analyserar..." : "Generera morgonbriefing"}
+              </ActionButton>
+              <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--dim)", textAlign: "center" }}>
+                Driftdata skickas till Anthropic API för analys. Inga personuppgifter inkluderas.
+              </p>
+            </>
           )}
 
           {brief && (

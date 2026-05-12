@@ -3,6 +3,70 @@ import * as XLSX from "xlsx";
 import { C } from "../shared/theme";
 import { ActionButton, Alert, Dropzone, PageHeader, Panel } from "../shared/components";
 
+// Cell map for "Infattning SDS" Visualisering-filen.
+// Rows and columns are 0-indexed. Update here if the Excel template changes.
+// Format: [row, col] for each flow state per K-bana.
+// Påfyllningar: rows iko/pavag/klart/total, Kartonger: same rows, different cols.
+const CELL_MAP = {
+  kbanor: [
+    { kbana: "K51",   line: "Line 1",   isPL: false,
+      pafyll: { iko:[13,13], pavag:[15,13], klart:[17,13], total:[19,13] },
+      kart:   { iko:[13,17], pavag:[15,17], klart:[17,17], total:[19,17] } },
+    { kbana: "K52",   line: "Line 1/2", isPL: false,
+      pafyll: { iko:[14,44], pavag:[16,44], klart:[18,44], total:[20,44] },
+      kart:   { iko:[14,48], pavag:[16,48], klart:[18,48], total:[20,48] } },
+    { kbana: "K53",   line: "Line 1/2", isPL: false,
+      pafyll: { iko:[14,53], pavag:[16,53], klart:[18,53], total:[20,53] },
+      kart:   { iko:[14,58], pavag:[16,58], klart:[18,58], total:[20,58] } },
+    { kbana: "K56",   line: "Line 2/4", isPL: false,
+      pafyll: { iko:[14,78], pavag:[16,78], klart:[18,78], total:[20,78] },
+      kart:   { iko:[14,82], pavag:[16,82], klart:[18,82], total:[20,82] } },
+    { kbana: "K58",   line: "Line 4/6", isPL: false,
+      pafyll: { iko:[34,14], pavag:[35,14], klart:[36,14], total:[37,14] },
+      kart:   { iko:[34,18], pavag:[35,18], klart:[36,18], total:[37,18] } },
+    { kbana: "K59",   line: "Line 6/7", isPL: false,
+      pafyll: { iko:[34,43], pavag:[35,43], klart:[36,43], total:[37,43] },
+      kart:   { iko:[34,47], pavag:[35,47], klart:[36,47], total:[37,47] } },
+    { kbana: "K60",   line: "Line 6/7", isPL: false,
+      pafyll: { iko:[34,52], pavag:[35,52], klart:[36,52], total:[37,52] },
+      kart:   { iko:[34,57], pavag:[35,57], klart:[36,57], total:[37,57] } },
+    { kbana: "K61-7", line: "Line 7",   isPL: false,
+      pafyll: { iko:[34,80], pavag:[35,80], klart:[36,80], total:[37,80] },
+      kart:   { iko:[34,84], pavag:[35,84], klart:[36,84], total:[37,84] } },
+    { kbana: "K55",   line: "Stn 36",   isPL: false,
+      pafyll: { iko:[51,11], pavag:[53,11], klart:[55,11], total:[58,11] },
+      kart:   { iko:[51,15], pavag:[53,15], klart:[55,15], total:[58,15] } },
+    { kbana: "K61-36",line: "Stn 36",  isPL: false,
+      pafyll: { iko:[51,19], pavag:[53,19], klart:[55,19], total:[58,19] },
+      kart:   { iko:[51,24], pavag:[53,24], klart:[55,24], total:[58,24] } },
+    { kbana: "K62",   line: "Stn 50",  isPL: false,
+      pafyll: { iko:[51,46], pavag:[53,46], klart:[55,46], total:[58,46] },
+      kart:   { iko:[51,51], pavag:[53,51], klart:[55,51], total:[58,51] } },
+    { kbana: "PL09",  line: "Pallar",  isPL: true,
+      pafyll: { iko:[67,16], pavag:[68,16], klart:[69,16], total:[70,16] },
+      kart:   null },
+  ],
+  pallarPerK: {
+    "K51":  { iko:[67,22], pavag:[68,22], klart:[69,22], total:[70,22] },
+    "K52":  { iko:[67,25], pavag:[68,25], klart:[69,25], total:[70,25] },
+    "K53":  { iko:[67,41], pavag:[68,41], klart:[69,41], total:[70,41] },
+    "K56":  { iko:[67,45], pavag:[68,45], klart:[69,45], total:[70,45] },
+    "K58":  { iko:[67,50], pavag:[68,50], klart:[69,50], total:[70,50] },
+    "K59":  { iko:[67,56], pavag:[68,56], klart:[69,56], total:[70,56] },
+    "K60":  { iko:[67,61], pavag:[68,61], klart:[69,61], total:[70,61] },
+    "K61":  { iko:[67,74], pavag:[68,74], klart:[69,74], total:[70,74] },
+  },
+  total: {
+    pafyll: { iko:[48,79], pavag:[50,79], klart:[52,79], total:[54,79] },
+    kart:   { iko:[48,83], pavag:[50,83], klart:[52,83], total:[54,83] },
+  },
+};
+
+function readFlow(R, coords) {
+  const g = ([r, c]) => +R[r]?.[c] || 0;
+  return { iko: g(coords.iko), pavag: g(coords.pavag), klart: g(coords.klart), total: g(coords.total) };
+}
+
 function parseLive(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -11,62 +75,26 @@ function parseLive(file) {
         const wb = XLSX.read(e.target.result, { type: "array" });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const R = XLSX.utils.sheet_to_json(sheet, { defval: "", header: 1 });
-        const n = (row, col) => +R[row]?.[col] || 0;
 
-        const kbanor = [
-          { kbana: "K51", line: "Line 1",
-            pafyll: { iko: n(13,13), pavag: n(15,13), klart: n(17,13), total: n(19,13) },
-            kart:   { iko: n(13,17), pavag: n(15,17), klart: n(17,17), total: n(19,17) } },
-          { kbana: "K52", line: "Line 1/2",
-            pafyll: { iko: n(14,44), pavag: n(16,44), klart: n(18,44), total: n(20,44) },
-            kart:   { iko: n(14,48), pavag: n(16,48), klart: n(18,48), total: n(20,48) } },
-          { kbana: "K53", line: "Line 1/2",
-            pafyll: { iko: n(14,53), pavag: n(16,53), klart: n(18,53), total: n(20,53) },
-            kart:   { iko: n(14,58), pavag: n(16,58), klart: n(18,58), total: n(20,58) } },
-          { kbana: "K56", line: "Line 2/4",
-            pafyll: { iko: n(14,78), pavag: n(16,78), klart: n(18,78), total: n(20,78) },
-            kart:   { iko: n(14,82), pavag: n(16,82), klart: n(18,82), total: n(20,82) } },
-          { kbana: "K58", line: "Line 4/6",
-            pafyll: { iko: n(34,14), pavag: n(35,14), klart: n(36,14), total: n(37,14) },
-            kart:   { iko: n(34,18), pavag: n(35,18), klart: n(36,18), total: n(37,18) } },
-          { kbana: "K59", line: "Line 6/7",
-            pafyll: { iko: n(34,43), pavag: n(35,43), klart: n(36,43), total: n(37,43) },
-            kart:   { iko: n(34,47), pavag: n(35,47), klart: n(36,47), total: n(37,47) } },
-          { kbana: "K60", line: "Line 6/7",
-            pafyll: { iko: n(34,52), pavag: n(35,52), klart: n(36,52), total: n(37,52) },
-            kart:   { iko: n(34,57), pavag: n(35,57), klart: n(36,57), total: n(37,57) } },
-          { kbana: "K61-7", line: "Line 7",
-            pafyll: { iko: n(34,80), pavag: n(35,80), klart: n(36,80), total: n(37,80) },
-            kart:   { iko: n(34,84), pavag: n(35,84), klart: n(36,84), total: n(37,84) } },
-          { kbana: "K55", line: "Stn 36",
-            pafyll: { iko: n(51,11), pavag: n(53,11), klart: n(55,11), total: n(58,11) },
-            kart:   { iko: n(51,15), pavag: n(53,15), klart: n(55,15), total: n(58,15) } },
-          { kbana: "K61-36", line: "Stn 36",
-            pafyll: { iko: n(51,19), pavag: n(53,19), klart: n(55,19), total: n(58,19) },
-            kart:   { iko: n(51,24), pavag: n(53,24), klart: n(55,24), total: n(58,24) } },
-          { kbana: "K62", line: "Stn 50",
-            pafyll: { iko: n(51,46), pavag: n(53,46), klart: n(55,46), total: n(58,46) },
-            kart:   { iko: n(51,51), pavag: n(53,51), klart: n(55,51), total: n(58,51) } },
-          { kbana: "PL09", line: "Pallar", isPL: true,
-            pafyll: { iko: n(67,16), pavag: n(68,16), klart: n(69,16), total: n(70,16) },
-            kart: null },
-        ];
+        const kbanor = CELL_MAP.kbanor.map(def => ({
+          kbana: def.kbana,
+          line:  def.line,
+          isPL:  def.isPL,
+          pafyll: readFlow(R, def.pafyll),
+          kart:   def.kart ? readFlow(R, def.kart) : null,
+        }));
 
-        const pallarPerK = {
-          "K51":  { iko: n(67,22), pavag: n(68,22), klart: n(69,22), total: n(70,22) },
-          "K52":  { iko: n(67,25), pavag: n(68,25), klart: n(69,25), total: n(70,25) },
-          "K53":  { iko: n(67,41), pavag: n(68,41), klart: n(69,41), total: n(70,41) },
-          "K56":  { iko: n(67,45), pavag: n(68,45), klart: n(69,45), total: n(70,45) },
-          "K58":  { iko: n(67,50), pavag: n(68,50), klart: n(69,50), total: n(70,50) },
-          "K59":  { iko: n(67,56), pavag: n(68,56), klart: n(69,56), total: n(70,56) },
-          "K60":  { iko: n(67,61), pavag: n(68,61), klart: n(69,61), total: n(70,61) },
-          "K61":  { iko: n(67,74), pavag: n(68,74), klart: n(69,74), total: n(70,74) },
-        };
+        const pallarPerK = Object.fromEntries(
+          Object.entries(CELL_MAP.pallarPerK).map(([k, coords]) => [k, readFlow(R, coords)])
+        );
 
         const total = {
-          pafyll: { iko: n(48,79), pavag: n(50,79), klart: n(52,79), total: n(54,79) },
-          kart:   { iko: n(48,83), pavag: n(50,83), klart: n(52,83), total: n(54,83) },
+          pafyll: readFlow(R, CELL_MAP.total.pafyll),
+          kart:   readFlow(R, CELL_MAP.total.kart),
         };
+
+        const allZero = kbanor.every(k => k.pafyll.total === 0 && !k.isPL);
+        if (allZero) throw new Error("Alla värden är noll — fel fil eller fel fliik? Kontrollera att det är Visualisering-filen (Infattning SDS).");
 
         const active = kbanor.filter(k => k.pafyll.total > 0 || k.isPL);
         resolve({ kbanor: active, pallarPerK, total, fileName: file.name, loaded: new Date().toLocaleTimeString("sv-SE") });
