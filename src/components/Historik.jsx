@@ -1,7 +1,16 @@
 import { useState, useMemo, useCallback } from "react";
 import * as XLSX from "xlsx";
-import { C, shadow } from "../shared/theme";
-import { PrestBar, BedomingPill, GapChip } from "../shared/components";
+import { C } from "../shared/theme";
+import {
+  ActionButton,
+  BedomingPill,
+  DataTable,
+  GapChip,
+  MetricCard,
+  MetricGrid,
+  Panel,
+  PrestBar,
+} from "../shared/components";
 import { parseDailyRows } from "../shared/parseDailyRows";
 
 const KBANA_ORDER = ["K51","K52","K53","K55","K56","K58","K59","K60","K61-7","K61-36","K62","K63"];
@@ -80,76 +89,67 @@ function parseDailyFile(file) {
 
 function DagTabell({ rows }) {
   return (
-    <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-        <thead>
-          <tr>
-            {["BANA","PERS","KOLLI","KART","PALL","PREST","GAP","SCAN","BEDOMNING"].map(h => (
-              <th key={h} style={{ padding: "7px 12px", textAlign: h === "BANA" ? "left" : "right", fontSize: 10, letterSpacing: 1, color: C.dim, fontWeight: 700, borderBottom: "1px solid " + C.border2, whiteSpace: "nowrap" }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
+    <DataTable headers={[
+      "BANA",
+      { label: "PERS", align: "right" },
+      { label: "KOLLI", align: "right" },
+      { label: "KART", align: "right" },
+      { label: "PALL", align: "right" },
+      { label: "PREST", align: "right" },
+      { label: "GAP", align: "right" },
+      { label: "SCAN", align: "right" },
+      { label: "BEDÖMNING", align: "right" },
+    ]}>
           {KBANA_ORDER.map(k => {
             const r = rows.find(x => x.kbana === k);
             if (!r) return null;
             const scanPct = r.scannat != null ? Math.round(r.scannat * 100) : null;
             const scanColor = scanPct == null ? C.dim : scanPct < 20 ? C.dim : scanPct < 60 ? C.red : scanPct < 75 ? C.yellow : C.green;
             return (
-              <tr key={k} style={{ borderBottom: "1px solid " + C.border }}
-                onMouseEnter={e => e.currentTarget.style.background = C.surface}
-                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <td style={{ padding: "8px 12px", fontWeight: 700, color: C.white }}>{r.kbana}</td>
-                <td style={{ padding: "8px 12px", textAlign: "right", fontFamily: "monospace", color: C.textDim }}>{r.pers}</td>
-                <td style={{ padding: "8px 12px", textAlign: "right", fontFamily: "monospace" }}>{r.kolli}</td>
-                <td style={{ padding: "8px 12px", textAlign: "right", fontFamily: "monospace" }}>{r.kart}</td>
-                <td style={{ padding: "8px 12px", textAlign: "right", fontFamily: "monospace" }}>{r.helpall}</td>
-                <td style={{ padding: "8px 12px", textAlign: "right" }}><PrestBar prest={r.prest} /></td>
-                <td style={{ padding: "8px 12px", textAlign: "right" }}><GapChip gap={r.gap} /></td>
-                <td style={{ padding: "8px 12px", textAlign: "right", fontFamily: "monospace", color: scanColor, fontWeight: scanPct !== null && scanPct < 75 ? 700 : 400 }}>
+              <tr key={k}>
+                <td className="primary-cell">{r.kbana}</td>
+                <td className="is-right mono-cell" style={{ color: C.textDim }}>{r.pers}</td>
+                <td className="is-right mono-cell">{r.kolli}</td>
+                <td className="is-right mono-cell">{r.kart}</td>
+                <td className="is-right mono-cell">{r.helpall}</td>
+                <td className="is-right"><PrestBar prest={r.prest} /></td>
+                <td className="is-right"><GapChip gap={r.gap} /></td>
+                <td className="is-right mono-cell" style={{ color: scanColor, fontWeight: scanPct !== null && scanPct < 75 ? 700 : 400 }}>
                   {scanPct != null ? scanPct + "%" : "-"}
                 </td>
-                <td style={{ padding: "8px 12px", textAlign: "right" }}><BedomingPill text={r.bedoming} /></td>
+                <td className="is-right"><BedomingPill text={r.bedoming} /></td>
               </tr>
             );
           })}
-        </tbody>
-      </table>
-    </div>
+    </DataTable>
   );
 }
 
 function SnitTabell({ agg }) {
   return (
-    <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-        <thead>
-          <tr>
-            {["BANA","DAGAR","SNITT KOLLI","SNITT KART","SNITT PREST","SNITT GAP"].map(h => (
-              <th key={h} style={{ padding: "7px 12px", textAlign: h === "BANA" ? "left" : "right", fontSize: 10, letterSpacing: 1, color: C.dim, fontWeight: 700, borderBottom: "1px solid " + C.border2 }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
+    <DataTable headers={[
+      "BANA",
+      { label: "DAGAR", align: "right" },
+      { label: "SNITT KOLLI", align: "right" },
+      { label: "SNITT KART", align: "right" },
+      { label: "SNITT PREST", align: "right" },
+      { label: "SNITT GAP", align: "right" },
+    ]}>
           {KBANA_ORDER.map(k => {
             const r = agg.find(x => x.kbana === k);
             if (!r) return null;
             return (
-              <tr key={k} style={{ borderBottom: "1px solid " + C.border }}
-                onMouseEnter={e => e.currentTarget.style.background = C.surface}
-                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <td style={{ padding: "8px 12px", fontWeight: 700, color: C.white }}>{r.kbana}</td>
-                <td style={{ padding: "8px 12px", textAlign: "right", fontFamily: "monospace", color: C.dim }}>{r.n}</td>
-                <td style={{ padding: "8px 12px", textAlign: "right", fontFamily: "monospace" }}>{Math.round(r.ko)}</td>
-                <td style={{ padding: "8px 12px", textAlign: "right", fontFamily: "monospace" }}>{Math.round(r.ka)}</td>
-                <td style={{ padding: "8px 12px", textAlign: "right" }}><PrestBar prest={r.prest} /></td>
-                <td style={{ padding: "8px 12px", textAlign: "right" }}><GapChip gap={r.gap} /></td>
+              <tr key={k}>
+                <td className="primary-cell">{r.kbana}</td>
+                <td className="is-right mono-cell" style={{ color: C.dim }}>{r.n}</td>
+                <td className="is-right mono-cell">{Math.round(r.ko)}</td>
+                <td className="is-right mono-cell">{Math.round(r.ka)}</td>
+                <td className="is-right"><PrestBar prest={r.prest} /></td>
+                <td className="is-right"><GapChip gap={r.gap} /></td>
               </tr>
             );
           })}
-        </tbody>
-      </table>
-    </div>
+    </DataTable>
   );
 }
 
@@ -258,10 +258,9 @@ export default function Historik() {
               onChange={e => { const f = Array.from(e.target.files); if (f.length) handleFiles(f); }} />
           </label>
           {allMonths.length > 0 && (
-            <button onClick={() => { saveHistory({}); setHistory({}); setSelMonth(null); setSelDay(null); }}
-              style={{ background: "transparent", border: "1px solid " + C.border, color: C.dim, borderRadius: 6, padding: "7px 10px", fontSize: 10, fontFamily: "monospace", cursor: "pointer" }}>
+            <ActionButton onClick={() => { saveHistory({}); setHistory({}); setSelMonth(null); setSelDay(null); }}>
               Rensa
-            </button>
+            </ActionButton>
           )}
         </div>
       </div>
@@ -331,7 +330,7 @@ export default function Historik() {
                     }}>
                     Månadssnitt
                   </button>
-                  <button onClick={() => {
+                  <ActionButton onClick={() => {
                     const nh = { ...history };
                     if (selDay && selMonth) {
                       delete nh[selMonth][selDay];
@@ -349,15 +348,15 @@ export default function Historik() {
                       }
                     }
                   }}
-                    style={{ background: "transparent", border: "1px solid " + C.border, color: C.dim, borderRadius: 5, padding: "5px 10px", fontSize: 10, fontFamily: "monospace", cursor: "pointer", marginLeft: "auto" }}>
+                    style={{ marginLeft: "auto" }}>
                     Ta bort dag
-                  </button>
+                  </ActionButton>
                 </div>
 
                 {/* Dag-vy */}
                 {view === "dag" && dayData && (
                   <div key={selDay} style={{ animation: "fade-up 0.2s ease" }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 16 }}>
+                    <MetricGrid columns={5}>
                       {[
                         { l: "PERS", v: dayData.summary.pers },
                         { l: "KOLLI", v: Math.round(dayData.summary.kolli) },
@@ -365,29 +364,20 @@ export default function Historik() {
                         { l: "PREST", v: Math.round((dayData.summary.prest || 0) * 100) + "%", col: (dayData.summary.prest || 0) > 1 ? C.red : C.green },
                         { l: "GAP", v: ((dayData.summary.gap || 0) > 0 ? "+" : "") + (dayData.summary.gap || 0).toFixed(1) + "h", col: (dayData.summary.gap || 0) > 0 ? C.green : C.red },
                       ].map(s => (
-                        <div key={s.l} style={{ background: C.panel, border: "1px solid " + C.border, borderRadius: 10, padding: "12px 14px", boxShadow: shadow.card }}>
-                          <div style={{ fontSize: 9, color: C.dim, letterSpacing: 2, marginBottom: 6, fontWeight: 600 }}>{s.l}</div>
-                          <div style={{ fontSize: 20, fontWeight: 800, color: s.col || C.text, fontFamily: "sans-serif" }}>{s.v}</div>
-                        </div>
+                        <MetricCard key={s.l} label={s.l} value={s.v} tone={s.col} />
                       ))}
-                    </div>
-                    <div style={{ background: C.panel, border: "1px solid " + C.border, borderRadius: 12, overflow: "hidden", boxShadow: shadow.card }}>
-                      <div style={{ padding: "12px 16px", borderBottom: "1px solid " + C.border, fontSize: 9, color: C.accent, letterSpacing: 3, fontWeight: 700, background: "rgba(255,255,255,0.02)" }}>
-                        {dayData.fileName}
-                      </div>
+                    </MetricGrid>
+                    <Panel title={dayData.fileName} flush>
                       <DagTabell rows={dayData.rows} />
-                    </div>
+                    </Panel>
                   </div>
                 )}
 
                 {/* Snitt-vy */}
                 {view === "snitt" && monthAgg && (
-                  <div key="snitt" style={{ animation: "fade-up 0.2s ease", background: C.panel, border: "1px solid " + C.blue + "44", borderRadius: 12, overflow: "hidden", boxShadow: shadow.card }}>
-                    <div style={{ padding: "12px 16px", borderBottom: "1px solid " + C.border, fontSize: 9, color: C.blue, letterSpacing: 3, fontWeight: 700, background: "rgba(255,255,255,0.02)" }}>
-                      MÅNADSSNITT - {fmtMonth(selMonth)} ({monthDays.length} dagar)
-                    </div>
+                  <Panel key="snitt" title={"MÅNADSSNITT - " + fmtMonth(selMonth) + " (" + monthDays.length + " dagar)"} accent="blue" flush>
                     <SnitTabell agg={monthAgg} />
-                  </div>
+                  </Panel>
                 )}
               </>
             )}

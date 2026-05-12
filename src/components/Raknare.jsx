@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { C } from "../shared/theme";
+import { ActionButton, DataTable, Dropzone, PageHeader, Panel } from "../shared/components";
 
 const KBANA_LIST = ["K51","K52","K53","K55","K56","K58","K59","K60","K61-7","K61-36","K62","K63"];
 
@@ -73,29 +74,16 @@ function readFile(file) {
   });
 }
 
-function Section({ title, children }) {
-  return (
-    <div className="section-card">
-      <div className="section-card__header">{title}</div>
-      <div className="section-card__body">{children}</div>
-    </div>
-  );
-}
-
-function DropLabel({ id, title, subtitle, onFile }) {
+function DropLabel({ title, subtitle, onFile }) {
   const [drag, setDrag] = useState(false);
   return (
-    <label htmlFor={id}
-      onDragOver={e => { e.preventDefault(); setDrag(true); }}
+    <div
+      onDragEnter={() => setDrag(true)}
       onDragLeave={() => setDrag(false)}
-      onDrop={e => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) onFile(f); }}
-      className={"dropzone" + (drag ? " is-dragging" : "")}
-      style={{ minHeight: 150, padding: "30px 16px" }}>
-      <div className="dropzone__title">{title}</div>
-      <div className="dropzone__subtitle">{subtitle}</div>
-      <input id={id} type="file" accept=".xlsx" style={{ display: "none" }}
-        onChange={e => { if (e.target.files[0]) onFile(e.target.files[0]); }} />
-    </label>
+      onDrop={() => setDrag(false)}
+    >
+      <Dropzone title={title} subtitle={subtitle} dragging={drag} compact onFile={onFile} />
+    </div>
   );
 }
 
@@ -291,41 +279,39 @@ export default function Raknare() {
 
   return (
     <div className="dashboard-page">
-      <div className="page-header">
-        <div>
-          <div className="eyebrow">Räknare</div>
-          <h1 className="page-title">Pallar - Infattning - Bemanning</h1>
-          <div className="page-subtitle">Tre snabba verktyg för att räkna volym, scan-andel och bemanning från Excel-utdrag.</div>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Räknare"
+        title="Pallar - Infattning - Bemanning"
+        subtitle="Tre snabba verktyg för att räkna volym, scan-andel och bemanning från Excel-utdrag."
+      />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+      <div className="tool-grid">
 
         {/* ── PALLAR ── */}
-        <Section title="HELPALLAR PER K-BANA">
+        <Panel title="HELPALLAR PER K-BANA">
           {!pallRaw ? (
-            <DropLabel id="pallFile" title="E1 Pall-utdrag" subtitle=".xlsx" onFile={handlePallFile} />
+            <DropLabel title="E1 Pall-utdrag" subtitle=".xlsx" onFile={handlePallFile} />
           ) : (
             <>
-              <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              <div className="form-row">
                 <select value={locCol} onChange={e => { setLocCol(e.target.value); localStorage.setItem("e1_loc_col", e.target.value); }}
-                  style={{ flex: 1, background: C.bg, color: C.text, border: "1px solid " + C.border, borderRadius: 4, padding: "5px 8px", fontSize: 11, fontFamily: "monospace" }}>
+                  className="select-field">
                   <option value="">Lagerplats...</option>
                   {pallRaw.columns.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
                 <select value={vnrCol} onChange={e => { setVnrCol(e.target.value); localStorage.setItem("e1_vnr_col", e.target.value); }}
-                  style={{ flex: 1, background: C.bg, color: C.text, border: "1px solid " + C.border, borderRadius: 4, padding: "5px 8px", fontSize: 11, fontFamily: "monospace" }}>
+                  className="select-field">
                   <option value="">VNR (valfritt)</option>
                   {pallRaw.columns.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
 
               {pallSummary && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginBottom: 8 }}>
+                <div className="mini-grid">
                   {KBANA_LIST.map(k => (
-                    <div key={k} style={{ background: C.surface, border: "1px solid " + C.border, borderRadius: 5, padding: "5px 10px", display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ fontSize: 11, color: C.textDim }}>{k}</span>
-                      <span style={{ fontFamily: "monospace", fontWeight: 700, color: pallSummary.counts[k] ? C.text : C.dim }}>{pallSummary.counts[k] || 0}</span>
+                    <div key={k} className="mini-stat">
+                      <span>{k}</span>
+                      <strong className={!pallSummary.counts[k] ? "is-muted" : undefined}>{pallSummary.counts[k] || 0}</strong>
                     </div>
                   ))}
                 </div>
@@ -333,25 +319,24 @@ export default function Raknare() {
 
               {pallSummary && (
                 <>
-                  <button onClick={() => setPallTextVisible(v => !v)}
-                    style={{ background: "transparent", border: "1px solid " + C.accent + "66", color: C.accent, borderRadius: 4, padding: "3px 10px", fontSize: 10, fontFamily: "monospace", cursor: "pointer", marginBottom: 6 }}>
+                  <ActionButton onClick={() => setPallTextVisible(v => !v)}>
                     {pallTextVisible ? "Dölj text" : "Visa text"}
-                  </button>
+                  </ActionButton>
                   {pallTextVisible && (
                     <textarea readOnly value={pallText} onClick={e => e.target.select()}
-                      style={{ width: "100%", height: 100, background: C.bg, color: C.text, border: "1px solid " + C.accent + "44", borderRadius: 6, padding: 8, fontSize: 10, fontFamily: "monospace", resize: "vertical", marginBottom: 8, boxSizing: "border-box" }} />
+                      className="copy-textarea" />
                   )}
                 </>
               )}
 
               {pallSummary?.unassigned?.length > 0 && (
-                <div style={{ background: C.yellow + "10", border: "1px solid " + C.yellow + "33", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
-                  <div style={{ fontSize: 10, color: C.yellow, marginBottom: 8, fontWeight: 700 }}>Crisplant ({pallSummary.unassigned.length}) - valj K-bana:</div>
+                <div className="warning-box">
+                  <div className="warning-box__title">Crisplant ({pallSummary.unassigned.length}) - välj K-bana:</div>
                   {pallSummary.unassigned.map(r => (
-                    <div key={r.index} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
-                      <span style={{ fontFamily: "monospace", fontSize: 10, color: C.textDim, flex: 1 }}>{r.vnr || r.to}</span>
+                    <div key={r.index} className="assignment-row">
+                      <span>{r.vnr || r.to}</span>
                       <select value={manualK[r.index] || ""} onChange={e => setManualK({ ...manualK, [r.index]: e.target.value })}
-                        style={{ background: C.bg, color: C.text, border: "1px solid " + C.border, borderRadius: 4, padding: "3px 6px", fontSize: 10, fontFamily: "monospace" }}>
+                        className="select-field select-field--compact">
                         <option value="">K-bana...</option>
                         {KBANA_LIST.map(k => <option key={k} value={k}>{k}</option>)}
                       </select>
@@ -360,29 +345,26 @@ export default function Raknare() {
                 </div>
               )}
 
-              <button onClick={() => { setPallRaw(null); setManualK({}); setPallTextVisible(false); }}
-                style={{ background: "transparent", border: "1px solid " + C.border, color: C.dim, borderRadius: 5, padding: "5px 10px", fontSize: 10, fontFamily: "monospace", cursor: "pointer" }}>
+              <ActionButton onClick={() => { setPallRaw(null); setManualK({}); setPallTextVisible(false); }}>
                 Ny fil
-              </button>
+              </ActionButton>
             </>
           )}
-        </Section>
+        </Panel>
 
         {/* ── INFATTNING ── */}
-        <Section title="INFATTNING">
+        <Panel title="INFATTNING">
           {!infattning ? (
-            <DropLabel id="infattningFile" title="Infattning Statistik" subtitle=".xlsx" onFile={handleInfattningFile} />
+            <DropLabel title="Infattning Statistik" subtitle=".xlsx" onFile={handleInfattningFile} />
           ) : (
             <>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, marginBottom: 8 }}>
-                <thead>
-                  <tr style={{ borderBottom: "1px solid " + C.border2 }}>
-                    {["K-BANA","ID ANV","ID E1","% SCAN","KART"].map(h => (
-                      <th key={h} style={{ padding: "5px 8px", textAlign: h === "K-BANA" ? "left" : "right", fontSize: 9, color: C.dim, fontWeight: 700 }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
+              <DataTable headers={[
+                "K-BANA",
+                { label: "ID ANV", align: "right" },
+                { label: "ID E1", align: "right" },
+                { label: "% SCAN", align: "right" },
+                { label: "KART", align: "right" },
+              ]}>
                   {KBANA_LIST.map(k => {
                     const c = infattningSummary?.counts?.[k];
                     if (!c) return null;
@@ -390,70 +372,69 @@ export default function Raknare() {
                     const pct = tot > 0 ? Math.round(c.idAnv / tot * 100) : 0;
                     const pc = pct >= 75 ? C.green : pct >= 60 ? C.yellow : C.red;
                     return (
-                      <tr key={k} style={{ borderBottom: "1px solid " + C.border + "40" }}>
-                        <td style={{ padding: "5px 8px", fontWeight: 700, color: C.white }}>{k}</td>
-                        <td style={{ padding: "5px 8px", textAlign: "right", fontFamily: "monospace" }}>{c.idAnv}</td>
-                        <td style={{ padding: "5px 8px", textAlign: "right", fontFamily: "monospace", color: C.textDim }}>{c.idE1}</td>
-                        <td style={{ padding: "5px 8px", textAlign: "right", fontFamily: "monospace", color: pc, fontWeight: 700 }}>{pct}%</td>
-                        <td style={{ padding: "5px 8px", textAlign: "right", fontFamily: "monospace" }}>{c.kart}</td>
+                      <tr key={k}>
+                        <td className="primary-cell">{k}</td>
+                        <td className="is-right mono-cell">{c.idAnv}</td>
+                        <td className="is-right mono-cell" style={{ color: C.textDim }}>{c.idE1}</td>
+                        <td className="is-right mono-cell" style={{ color: pc, fontWeight: 700 }}>{pct}%</td>
+                        <td className="is-right mono-cell">{c.kart}</td>
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
+              </DataTable>
 
-              <div style={{ fontSize: 10, color: C.dim, marginBottom: 8 }}>
+              <div className="tool-note">
                 {infattningSummary?.tAnv} scanner - {infattningSummary?.tE1} E1 - {infattningSummary?.tKart} kart
               </div>
 
-              <button onClick={() => setInfTextVisible(v => !v)}
-                style={{ background: "transparent", border: "1px solid " + C.accent + "66", color: C.accent, borderRadius: 4, padding: "3px 10px", fontSize: 10, fontFamily: "monospace", cursor: "pointer", marginBottom: 6 }}>
+              <ActionButton onClick={() => setInfTextVisible(v => !v)}>
                 {infTextVisible ? "Dölj text" : "Visa text"}
-              </button>
+              </ActionButton>
               {infTextVisible && (
                 <textarea readOnly value={infText} onClick={e => e.target.select()}
-                  style={{ width: "100%", height: 120, background: C.bg, color: C.text, border: "1px solid " + C.accent + "44", borderRadius: 6, padding: 8, fontSize: 10, fontFamily: "monospace", resize: "vertical", marginBottom: 8, boxSizing: "border-box" }} />
+                  className="copy-textarea copy-textarea--tall" />
               )}
 
-              <button onClick={() => { setInfattning(null); setInfTextVisible(false); }}
-                style={{ background: "transparent", border: "1px solid " + C.border, color: C.dim, borderRadius: 5, padding: "5px 10px", fontSize: 10, fontFamily: "monospace", cursor: "pointer" }}>
+              <div className="button-row">
+                <ActionButton onClick={() => { setInfattning(null); setInfTextVisible(false); }}>
                 Ny fil
-              </button>
+                </ActionButton>
+              </div>
             </>
           )}
-        </Section>
+        </Panel>
 
         {/* ── BEMANNING ── */}
-        <Section title="BEMANNING">
+        <Panel title="BEMANNING">
           {!userScan ? (
-            <DropLabel id="userFile" title="Användarscan" subtitle=".xlsx - Butema User + To Location" onFile={handleUserFile} />
+            <DropLabel title="Användarscan" subtitle=".xlsx - Butema User + To Location" onFile={handleUserFile} />
           ) : (
             <>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <span style={{ fontSize: 11, color: C.textDim }}>Tröskel:</span>
+              <div className="range-row">
+                <span>Tröskel:</span>
                 <input type="range" min="1" max="50" value={threshold} onChange={e => setThreshold(+e.target.value)}
-                  style={{ flex: 1, accentColor: C.accent }} />
-                <span style={{ fontFamily: "monospace", color: C.accent, fontWeight: 700, minWidth: 24 }}>{threshold}</span>
+                  style={{ accentColor: C.accent }} />
+                <strong>{threshold}</strong>
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+              <div className="staff-list">
                 {userSummary?.kList.map(kb => (
-                  <div key={kb.kbana} style={{ background: C.surface, border: "1px solid " + C.border, borderRadius: 7, padding: "10px 12px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontWeight: 700, color: C.white, fontSize: 12 }}>{kb.kbana}</span>
-                      <span style={{ fontSize: 11, color: C.accent }}>
+                  <div key={kb.kbana} className="staff-card">
+                    <div className="staff-card__head">
+                      <span>{kb.kbana}</span>
+                      <span>
                         <strong>{kb.aktiva.length}</strong>
-                        <span style={{ color: C.dim }}> pers - {kb.tot} scans</span>
+                        <span> pers - {kb.tot} scans</span>
                       </span>
                     </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    <div className="staff-card__chips">
                       {kb.aktiva.map(u => (
-                        <span key={u.u} style={{ background: C.green + "20", color: C.green, border: "1px solid " + C.green + "44", borderRadius: 3, padding: "2px 7px", fontSize: 10, fontFamily: "monospace" }}>
+                        <span key={u.u} className="staff-chip staff-chip--active">
                           {u.u}: {u.c}
                         </span>
                       ))}
                       {kb.drops.map(u => (
-                        <span key={u.u} style={{ color: C.dim, border: "1px solid " + C.border, borderRadius: 3, padding: "2px 7px", fontSize: 10, fontFamily: "monospace" }}>
+                        <span key={u.u} className="staff-chip">
                           {u.u}: {u.c}
                         </span>
                       ))}
@@ -462,43 +443,41 @@ export default function Raknare() {
                 ))}
               </div>
 
-              <div style={{ fontSize: 10, color: C.dim, marginBottom: 8 }}>
+              <div className="tool-note">
                 {userSummary?.userList.length} unika - {userSummary?.total} scans
               </div>
 
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <div style={{ fontSize: 9, color: C.dim, letterSpacing: 2, fontWeight: 700 }}>TOPPLISTA</div>
-                  <button onClick={() => setUserTextVisible(v => !v)}
-                    style={{ background: "transparent", border: "1px solid " + C.accent + "66", color: C.accent, borderRadius: 4, padding: "3px 10px", fontSize: 10, fontFamily: "monospace", cursor: "pointer" }}>
+              <div className="leaderboard">
+                <div className="leaderboard__head">
+                  <div>TOPPLISTA</div>
+                  <ActionButton onClick={() => setUserTextVisible(v => !v)}>
                     {userTextVisible ? "Dölj text" : "Visa text"}
-                  </button>
+                  </ActionButton>
                 </div>
                 {userTextVisible && (
                   <textarea readOnly value={userText} onClick={e => e.target.select()}
-                    style={{ width: "100%", height: 120, background: C.bg, color: C.text, border: "1px solid " + C.accent + "44", borderRadius: 6, padding: 8, fontSize: 10, fontFamily: "monospace", resize: "vertical", marginBottom: 8, boxSizing: "border-box" }} />
+                    className="copy-textarea copy-textarea--tall" />
                 )}
-                <div style={{ background: C.surface, border: "1px solid " + C.border, borderRadius: 7, overflow: "hidden" }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "24px 1fr 60px", padding: "5px 10px", borderBottom: "1px solid " + C.border2, fontSize: 9, color: C.dim, fontWeight: 700 }}>
+                <div className="leaderboard__table">
+                  <div className="leaderboard__row leaderboard__row--head">
                     <span>#</span><span>ANVÄNDARE</span><span style={{ textAlign: "right" }}>SCANS</span>
                   </div>
                   {userSummary?.userList.map((u, i) => (
-                    <div key={u.u} style={{ display: "grid", gridTemplateColumns: "24px 1fr 60px", padding: "5px 10px", borderBottom: i < userSummary.userList.length - 1 ? "1px solid " + C.border + "40" : "none", background: i % 2 === 0 ? "transparent" : C.bg + "60", alignItems: "center" }}>
-                      <span style={{ fontSize: 10, color: C.dim, fontFamily: "monospace" }}>{i + 1}</span>
-                      <span style={{ fontFamily: "monospace", fontSize: 11, color: u.t > threshold ? C.text : C.textDim }}>{u.u}</span>
-                      <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: u.t > threshold ? C.green : C.dim, textAlign: "right" }}>{u.t}</span>
+                    <div key={u.u} className="leaderboard__row">
+                      <span>{i + 1}</span>
+                      <span className={u.t > threshold ? undefined : "is-muted"}>{u.u}</span>
+                      <strong className={u.t > threshold ? "is-active" : undefined}>{u.t}</strong>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <button onClick={() => { setUserScan(null); setUserTextVisible(false); }}
-                style={{ background: "transparent", border: "1px solid " + C.border, color: C.dim, borderRadius: 5, padding: "5px 10px", fontSize: 10, fontFamily: "monospace", cursor: "pointer" }}>
+              <ActionButton onClick={() => { setUserScan(null); setUserTextVisible(false); }}>
                 Ny fil
-              </button>
+              </ActionButton>
             </>
           )}
-        </Section>
+        </Panel>
       </div>
     </div>
   );

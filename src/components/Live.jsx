@@ -1,6 +1,7 @@
 import { useState } from "react";
 import * as XLSX from "xlsx";
-import { C, shadow } from "../shared/theme";
+import { C } from "../shared/theme";
+import { ActionButton, Alert, Dropzone, PageHeader, Panel } from "../shared/components";
 
 function parseLive(file) {
   return new Promise((resolve, reject) => {
@@ -83,30 +84,26 @@ function FlowBar({ iko, pavag, klart, total }) {
   const pK = (klart / total) * 100;
   return (
     <div>
-      <div style={{ display: "flex", height: 6, borderRadius: 4, overflow: "hidden", gap: 1, marginBottom: 8 }}>
-        <div style={{ width: pI + "%", background: C.red, transition: "width 0.3s ease" }} />
-        <div style={{ width: pP + "%", background: C.yellow, transition: "width 0.3s ease" }} />
-        <div style={{ width: pK + "%", background: C.green, transition: "width 0.3s ease" }} />
+      <div className="flow-bar__track">
+        <div className="flow-bar__segment" style={{ width: pI + "%", background: C.red }} />
+        <div className="flow-bar__segment" style={{ width: pP + "%", background: C.yellow }} />
+        <div className="flow-bar__segment" style={{ width: pK + "%", background: C.green }} />
       </div>
-      <div style={{ display: "flex", gap: 10, fontSize: 11, fontFamily: "monospace" }}>
+      <div className="flow-bar__legend">
         <span style={{ color: C.red }}>Iko {iko}</span>
-        <span style={{ color: C.yellow }}>Vag {pavag}</span>
+        <span style={{ color: C.yellow }}>Väg {pavag}</span>
         <span style={{ color: C.green }}>Klart {klart}</span>
-        <span style={{ color: C.dim, marginLeft: "auto" }}>Tot {total}</span>
+        <span className="flow-bar__total">Tot {total}</span>
       </div>
     </div>
   );
 }
 
 function StatusPill({ total, iko, klart }) {
-  const label = klart === total && total > 0 ? "KLART" : iko > 0 ? "I KO" : "PA VAG";
+  const label = klart === total && total > 0 ? "KLART" : iko > 0 ? "I KO" : "PÅ VÄG";
   const color = klart === total && total > 0 ? C.green : iko > 0 ? C.red : C.yellow;
   return (
-    <span style={{
-      fontSize: 10, fontWeight: 700, color,
-      background: color + "20", border: "1px solid " + color + "44",
-      borderRadius: 3, padding: "2px 7px",
-    }}>{label}</span>
+    <span className="status-pill" style={{ color, background: color + "20", border: "1px solid " + color + "44" }}>{label}</span>
   );
 }
 
@@ -122,16 +119,12 @@ export default function Live() {
 
   return (
     <div className="dashboard-page">
-      <div className="page-header">
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span className="live-dot" />
-            <span className="eyebrow" style={{ marginBottom: 0, color: C.red }}>LIVE - NULÄGE</span>
-          </div>
-          <h1 className="page-title">Infattningsstatus</h1>
-          <div className="page-subtitle">Följ K-banor, påfyllningar, kartonger och helpallar från Visualisering-filen.</div>
-        </div>
-        {data && (
+      <PageHeader
+        live
+        eyebrow="Live - nuläge"
+        title="Infattningsstatus"
+        subtitle="Följ K-banor, påfyllningar, kartonger och helpallar från Visualisering-filen."
+        actions={data && (
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 11, color: C.dim }}>{data.fileName}</div>
             <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
@@ -144,85 +137,78 @@ export default function Live() {
             </div>
           </div>
         )}
-      </div>
+      />
 
-      {err && (
-        <div style={{ color: C.red, background: C.red + "12", border: "1px solid " + C.red + "44", borderRadius: 8, padding: "12px 16px", marginBottom: 16, fontSize: 13, boxShadow: shadow.sm }}>
-          {err}
-        </div>
-      )}
+      {err && <Alert>{err}</Alert>}
 
       {!data && (
-        <label
-          onDragOver={e => { e.preventDefault(); setDrag(true); }}
+        <div
+          onDragEnter={() => setDrag(true)}
           onDragLeave={() => setDrag(false)}
-          onDrop={e => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
-          className={"dropzone" + (drag ? " is-dragging" : "")}
+          onDrop={() => setDrag(false)}
         >
-          <div className="dropzone__icon">L</div>
-          <div className="dropzone__title">Släpp Visualisering-filen här</div>
-          <div className="dropzone__subtitle">Infattning SDS .xlsx</div>
-          <input type="file" accept=".xlsx" style={{ display: "none" }}
-            onChange={e => { if (e.target.files[0]) handleFile(e.target.files[0]); }} />
-        </label>
+          <Dropzone
+            icon="L"
+            title="Släpp Visualisering-filen här"
+            subtitle="Infattning SDS .xlsx"
+            dragging={drag}
+            onFile={handleFile}
+          />
+        </div>
       )}
 
       {data && (
         <div style={{ animation: "fade-up 0.25s ease" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 14, marginBottom: 20 }}>
+          <div className="kbana-grid">
             {data.kbanor.map(kb => (
-              <div key={kb.kbana} style={{ background: C.panel, border: "1px solid " + C.border, borderRadius: 12, overflow: "hidden", boxShadow: shadow.card }}>
-                <div style={{ padding: "12px 16px", borderBottom: "1px solid " + C.border, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <Panel key={kb.kbana} className="kbana-card" flush>
+                <div className="kbana-card__head">
                   <div>
-                    <span style={{ fontWeight: 800, fontSize: 15, color: C.white, fontFamily: "sans-serif" }}>{kb.kbana}</span>
-                    <span style={{ fontSize: 11, color: C.dim, marginLeft: 8 }}>{kb.line}</span>
+                    <span className="kbana-card__title">{kb.kbana}</span>
+                    <span className="kbana-card__meta">{kb.line}</span>
                   </div>
                   <StatusPill {...kb.pafyll} />
                 </div>
-                <div style={{ padding: "14px 16px" }}>
-                  <div style={{ fontSize: 10, color: C.dim, letterSpacing: 1, marginBottom: 8, fontWeight: 600 }}>
+                <div className="kbana-card__body">
+                  <div className="block-label">
                     {kb.isPL ? "PALLAR" : "PÅFYLLNINGAR"}
                   </div>
                   <FlowBar {...kb.pafyll} />
                   {kb.kart && (
                     <div style={{ marginTop: 16 }}>
-                      <div style={{ fontSize: 10, color: C.dim, letterSpacing: 1, marginBottom: 8, fontWeight: 600 }}>KARTONGER</div>
+                      <div className="block-label">KARTONGER</div>
                       <FlowBar {...kb.kart} />
                     </div>
                   )}
                   {data.pallarPerK[kb.kbana] && data.pallarPerK[kb.kbana].total > 0 && (
                     <div style={{ marginTop: 16 }}>
-                      <div style={{ fontSize: 10, color: C.dim, letterSpacing: 1, marginBottom: 8, fontWeight: 600 }}>HELPALLAR</div>
+                      <div className="block-label">HELPALLAR</div>
                       <FlowBar {...data.pallarPerK[kb.kbana]} />
                     </div>
                   )}
                 </div>
-              </div>
+              </Panel>
             ))}
           </div>
 
           {data.total && data.total.pafyll.total > 0 && (
-            <div style={{ background: C.panel, border: "1px solid " + C.accent + "44", borderRadius: 12, padding: "16px 20px", boxShadow: shadow.card, marginBottom: 16 }}>
-              <div style={{ fontSize: 10, color: C.accent, letterSpacing: 3, fontWeight: 700, marginBottom: 14 }}>TOTALT</div>
+            <Panel title="TOTALT" className="live-total">
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
                 <div>
-                  <div style={{ fontSize: 10, color: C.dim, marginBottom: 8, fontWeight: 600 }}>PÅFYLLNINGAR</div>
+                  <div className="block-label">PÅFYLLNINGAR</div>
                   <FlowBar {...data.total.pafyll} />
                 </div>
                 <div>
-                  <div style={{ fontSize: 10, color: C.dim, marginBottom: 8, fontWeight: 600 }}>KARTONGER</div>
+                  <div className="block-label">KARTONGER</div>
                   <FlowBar {...data.total.kart} />
                 </div>
               </div>
-            </div>
+            </Panel>
           )}
 
-          <button onClick={() => setData(null)}
-            style={{ background: "transparent", border: "1px solid " + C.border, color: C.dim, borderRadius: 6, padding: "8px 14px", fontSize: 12, fontFamily: "monospace", cursor: "pointer", transition: "border-color 0.15s, color 0.15s" }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = C.textDim; e.currentTarget.style.color = C.text; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.dim; }}>
+          <ActionButton onClick={() => setData(null)}>
             Ladda ny fil
-          </button>
+          </ActionButton>
         </div>
       )}
     </div>

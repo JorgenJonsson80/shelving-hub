@@ -1,7 +1,19 @@
 import { useState } from "react";
 import * as XLSX from "xlsx";
-import { C, shadow } from "../shared/theme";
-import { PrestBar, BedomingPill, GapChip } from "../shared/components";
+import { C } from "../shared/theme";
+import {
+  ActionButton,
+  Alert,
+  BedomingPill,
+  DataTable,
+  Dropzone,
+  GapChip,
+  MetricCard,
+  MetricGrid,
+  PageHeader,
+  Panel,
+  PrestBar,
+} from "../shared/components";
 import { parseDailyRows } from "../shared/parseDailyRows";
 
 function parseDailyFile(file) {
@@ -98,131 +110,104 @@ export default function Brief() {
 
   return (
     <div className="dashboard-page">
-      <div className="page-header">
-        <div>
-          <div className="eyebrow">Daily Brief</div>
-          <h1 className="page-title">Morgonanalys</h1>
-          <div className="page-subtitle">Summera gårdagens volym, prestation, gap och scan-avvikelser per bana.</div>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Daily Brief"
+        title="Morgonanalys"
+        subtitle="Summera gårdagens volym, prestation, gap och scan-avvikelser per bana."
+      />
 
-      {err && (
-        <div style={{ color: C.red, background: C.red + "12", border: "1px solid " + C.red + "44", borderRadius: 8, padding: "12px 16px", marginBottom: 16, fontSize: 13, boxShadow: shadow.sm }}>
-          {err}
-        </div>
-      )}
+      {err && <Alert>{err}</Alert>}
 
       {!parsed && (
-        <label
-          onDragOver={e => { e.preventDefault(); setDrag(true); }}
+        <div
+          onDragEnter={() => setDrag(true)}
           onDragLeave={() => setDrag(false)}
-          onDrop={e => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
-          className={"dropzone" + (drag ? " is-dragging" : "")}
+          onDrop={() => setDrag(false)}
         >
-          <div className="dropzone__icon">B</div>
-          <div className="dropzone__title">Släpp Daily-filen här</div>
-          <div className="dropzone__subtitle">NTR Daily Shelving .xlsx</div>
-          <input type="file" accept=".xlsx" style={{ display: "none" }}
-            onChange={e => { if (e.target.files[0]) handleFile(e.target.files[0]); }} />
-        </label>
+          <Dropzone
+            icon="B"
+            title="Släpp Daily-filen här"
+            subtitle="NTR Daily Shelving .xlsx"
+            dragging={drag}
+            onFile={handleFile}
+          />
+        </div>
       )}
 
       {parsed && (
         <div style={{ animation: "fade-up 0.25s ease" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 20 }}>
+          <MetricGrid columns={4}>
             {[
               { l: "PERS", v: parsed.rows.reduce((s, r) => s + r.pers, 0).toFixed(1) },
               { l: "KOLLI", v: parsed.rows.reduce((s, r) => s + r.kolli, 0) },
               { l: "KARTONGER", v: parsed.rows.reduce((s, r) => s + r.kart, 0) },
               { l: "SCAN TOTALT", v: parsed.grandTotal ? (parsed.grandTotal * 100).toFixed(0) + "%" : "-" },
             ].map(s => (
-              <div key={s.l} style={{ background: C.panel, border: "1px solid " + C.border, borderRadius: 10, padding: "12px 16px", boxShadow: shadow.card }}>
-                <div style={{ fontSize: 9, color: C.dim, letterSpacing: 2, marginBottom: 6, fontWeight: 600 }}>{s.l}</div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: C.white, fontFamily: "sans-serif" }}>{s.v}</div>
-              </div>
+              <MetricCard key={s.l} label={s.l} value={s.v} />
             ))}
-          </div>
+          </MetricGrid>
 
-          <div style={{ background: C.panel, border: "1px solid " + C.border, borderRadius: 12, overflow: "hidden", marginBottom: 16, boxShadow: shadow.card }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: "rgba(255,255,255,0.02)" }}>
-                  {["BANA","PERS","KOLLI","KART","PREST","GAP","SCAN","BEDOMNING"].map(h => (
-                    <th key={h} style={{ padding: "10px 12px", textAlign: h === "BANA" ? "left" : "right", fontSize: 9, letterSpacing: 1.5, color: C.dim, fontWeight: 700, borderBottom: "1px solid " + C.border2 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
+          <Panel className="data-panel" flush>
+            <DataTable headers={[
+              "BANA",
+              { label: "PERS", align: "right" },
+              { label: "KOLLI", align: "right" },
+              { label: "KART", align: "right" },
+              { label: "PREST", align: "right" },
+              { label: "GAP", align: "right" },
+              { label: "SCAN", align: "right" },
+              { label: "BEDÖMNING", align: "right" },
+            ]}>
                 {parsed.rows.map((r, i) => {
                   const scanRate = r.scannat != null ? r.scannat : getScanRate(r.kbana, parsed.scanRates);
                   const scanPct = scanRate != null ? Math.round(scanRate * 100) : null;
                   const scanColor = scanPct == null ? C.dim : scanPct < 20 ? C.dim : scanPct < 60 ? C.red : scanPct < 75 ? C.yellow : C.green;
                   return (
-                    <tr key={i} style={{ borderBottom: i < parsed.rows.length - 1 ? "1px solid " + C.border : "none", transition: "background 0.1s" }}
-                      onMouseEnter={e => e.currentTarget.style.background = C.surface}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                      <td style={{ padding: "9px 12px", fontWeight: 700, color: C.white, fontFamily: "sans-serif" }}>{r.kbana}</td>
-                      <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "monospace", color: C.textDim }}>{r.pers}</td>
-                      <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "monospace" }}>{r.kolli}</td>
-                      <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "monospace" }}>{r.kart}</td>
-                      <td style={{ padding: "9px 12px", textAlign: "right" }}><PrestBar prest={r.prest} /></td>
-                      <td style={{ padding: "9px 12px", textAlign: "right" }}><GapChip gap={r.gap} /></td>
-                      <td style={{ padding: "9px 12px", textAlign: "right", fontFamily: "monospace", color: scanColor, fontWeight: scanPct !== null && scanPct < 75 ? 700 : 400 }}>
+                    <tr key={i}>
+                      <td className="primary-cell">{r.kbana}</td>
+                      <td className="is-right mono-cell" style={{ color: C.textDim }}>{r.pers}</td>
+                      <td className="is-right mono-cell">{r.kolli}</td>
+                      <td className="is-right mono-cell">{r.kart}</td>
+                      <td className="is-right"><PrestBar prest={r.prest} /></td>
+                      <td className="is-right"><GapChip gap={r.gap} /></td>
+                      <td className="is-right mono-cell" style={{ color: scanColor, fontWeight: scanPct !== null && scanPct < 75 ? 700 : 400 }}>
                         {scanPct != null ? scanPct + "%" : "-"}
                       </td>
-                      <td style={{ padding: "9px 12px", textAlign: "right" }}>
+                      <td className="is-right">
                         <BedomingPill text={r.bedoming} />
                       </td>
                     </tr>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+            </DataTable>
+          </Panel>
 
           {!brief && (
-            <button onClick={generateBrief} disabled={loading}
-              style={{
-                width: "100%", background: loading ? C.surface : C.accent,
-                color: loading ? C.textDim : "#000",
-                border: "1px solid " + (loading ? C.border : "transparent"),
-                borderRadius: 10, padding: 14, fontSize: 13, fontWeight: 800,
-                fontFamily: "monospace", cursor: loading ? "not-allowed" : "pointer",
-                marginBottom: 12, transition: "all 0.2s ease",
-                opacity: loading ? 0.7 : 1,
-              }}>
+            <ActionButton onClick={generateBrief} disabled={loading} variant="primary" full>
               {loading ? "Analyserar..." : "Generera morgonbriefing"}
-            </button>
+            </ActionButton>
           )}
 
           {brief && (
-            <div style={{ background: C.panel, border: "1px solid " + C.accent + "44", borderRadius: 12, padding: 20, marginBottom: 12, boxShadow: shadow.card, animation: "fade-up 0.3s ease" }}>
-              <div style={{ fontSize: 9, color: C.accent, letterSpacing: 3, marginBottom: 14, fontWeight: 700 }}>AI-ANALYS</div>
+            <Panel title="AI-ANALYS" className="ai-panel">
               <div style={{ fontSize: 13, lineHeight: 1.9, color: C.text, whiteSpace: "pre-wrap", fontFamily: "sans-serif" }}>{brief}</div>
               <div style={{ display: "flex", gap: 8, marginTop: 16, paddingTop: 14, borderTop: "1px solid " + C.border }}>
-                <button onClick={generateBrief}
-                  style={{ background: "transparent", border: "1px solid " + C.border, color: C.textDim, borderRadius: 6, padding: "7px 14px", fontSize: 12, fontFamily: "monospace", cursor: "pointer", transition: "border-color 0.15s, color 0.15s" }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.textDim; e.currentTarget.style.color = C.text; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.textDim; }}>
+                <ActionButton onClick={generateBrief}>
                   Ny analys
-                </button>
-                <button onClick={() => { setParsed(null); setBrief(null); }}
-                  style={{ background: "transparent", border: "1px solid " + C.border, color: C.textDim, borderRadius: 6, padding: "7px 14px", fontSize: 12, fontFamily: "monospace", cursor: "pointer", transition: "border-color 0.15s, color 0.15s" }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = C.textDim; e.currentTarget.style.color = C.text; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.textDim; }}>
+                </ActionButton>
+                <ActionButton onClick={() => { setParsed(null); setBrief(null); }}>
                   Ny fil
-                </button>
+                </ActionButton>
               </div>
-            </div>
+            </Panel>
           )}
 
           {!brief && (
-            <button onClick={() => { setParsed(null); setBrief(null); }}
-              style={{ background: "transparent", border: "1px solid " + C.border, color: C.dim, borderRadius: 6, padding: "8px 14px", fontSize: 12, fontFamily: "monospace", cursor: "pointer", transition: "border-color 0.15s, color 0.15s" }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = C.textDim; e.currentTarget.style.color = C.text; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.dim; }}>
+            <div style={{ marginTop: 12 }}>
+              <ActionButton onClick={() => { setParsed(null); setBrief(null); }}>
               Ny fil
-            </button>
+              </ActionButton>
+            </div>
           )}
         </div>
       )}
