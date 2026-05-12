@@ -241,20 +241,19 @@ export default function Historik() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 58px)" }}>
-      {/* Header */}
-      <div style={{ background: C.surface, borderBottom: "1px solid " + C.border, padding: "14px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+    <div className="historik">
+      <div className="historik__topbar">
         <div>
-          <div style={{ fontSize: 10, color: C.accent, letterSpacing: 3, fontWeight: 700, marginBottom: 2 }}>HISTORIK</div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: C.white, fontFamily: "sans-serif" }}>
-            {allMonths.length} månad{allMonths.length !== 1 ? "er" : ""} - {totalDays} dagar
+          <div className="historik__label">HISTORIK</div>
+          <div className="historik__title">
+            {allMonths.length} månad{allMonths.length !== 1 ? "er" : ""} — {totalDays} dagar
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {msg && <span style={{ fontSize: 11, color: C.green }}>{msg}</span>}
-          <label style={{ background: C.panel, border: "1px dashed " + C.border2, borderRadius: 6, padding: "7px 14px", fontSize: 11, color: C.textDim, cursor: "pointer" }}>
+        <div className="historik__topbar-actions">
+          {msg && <span className="historik__msg">{msg}</span>}
+          <label className="historik__upload">
             {uploading ? "Laddar..." : "Lägg till filer"}
-            <input type="file" multiple accept=".xlsx" style={{ display: "none" }}
+            <input type="file" multiple accept=".xlsx" className="visually-hidden-input"
               onChange={e => { const f = Array.from(e.target.files); if (f.length) handleFiles(f); }} />
           </label>
           {allMonths.length > 0 && (
@@ -266,96 +265,79 @@ export default function Historik() {
       </div>
 
       {!allMonths.length ? (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, gap: 16, padding: 40 }}>
-          <div style={{ fontSize: 48 }}>&#128193;</div>
-          <div style={{ color: C.textDim, textAlign: "center", fontSize: 15 }}>
+        <div className="historik__empty">
+          <div className="historik__empty-icon">&#128193;</div>
+          <div className="historik__empty-text">
             Inga filer inlästa än.<br />Ladda upp dina Daily-filer ovan.
           </div>
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "200px 1fr", flex: 1, minHeight: 0 }}>
-          {/* Sidebar */}
-          <div style={{ background: C.surface, borderRight: "1px solid " + C.border, overflowY: "auto" }}>
-            <div style={{ fontSize: 9, color: C.dim, letterSpacing: 2, padding: "14px 14px 8px", fontWeight: 700 }}>MÅNADER</div>
+        <div className="historik__body">
+          <div className="historik__sidebar">
+            <div className="historik__sidebar-label">MÅNADER</div>
             {allMonths.map(m => (
-              <button key={m} onClick={() => {
-                setSelMonth(m);
-                const days = Object.keys(history[m]).sort();
-                setSelDay(days[days.length - 1]);
-                setView("dag");
-              }}
-                style={{
-                  width: "100%", background: m === selMonth ? C.accent + "15" : "transparent",
-                  border: "none", borderLeft: "3px solid " + (m === selMonth ? C.accent : "transparent"),
-                  padding: "10px 14px", textAlign: "left", cursor: "pointer",
-                  color: m === selMonth ? C.white : C.textDim,
-                  fontFamily: "monospace", fontSize: 11,
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                }}>
+              <button
+                key={m}
+                className={"historik__month-btn" + (m === selMonth ? " is-active" : "")}
+                onClick={() => {
+                  setSelMonth(m);
+                  const days = Object.keys(history[m]).sort();
+                  setSelDay(days[days.length - 1]);
+                  setView("dag");
+                }}
+              >
                 <span>{fmtMonth(m)}</span>
-                <span style={{ fontSize: 10, color: m === selMonth ? C.accent : C.dim, background: m === selMonth ? C.accent + "22" : C.border, borderRadius: 10, padding: "1px 6px" }}>
-                  {Object.keys(history[m]).length}d
-                </span>
+                <span className="historik__month-count">{Object.keys(history[m]).length}d</span>
               </button>
             ))}
           </div>
 
-          {/* Main */}
-          <div style={{ overflowY: "auto", padding: "20px 24px" }}>
+          <div className="historik__main">
             {selMonth && (
               <>
-                {/* Dag-knappar */}
-                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 20, alignItems: "center" }}>
+                <div className="historik__day-bar">
                   {monthDays.map(d => (
-                    <button key={d} onClick={() => { setSelDay(d); setView("dag"); }}
-                      style={{
-                        background: d === selDay && view === "dag" ? C.accent : C.panel,
-                        border: "1px solid " + (d === selDay && view === "dag" ? C.accent : C.border2),
-                        color: d === selDay && view === "dag" ? "#000" : C.textDim,
-                        borderRadius: 5, padding: "5px 10px", fontSize: 11,
-                        fontFamily: "monospace", fontWeight: d === selDay && view === "dag" ? 700 : 400,
-                        cursor: "pointer",
-                      }}>
+                    <button
+                      key={d}
+                      className={"historik__day-btn" + (d === selDay && view === "dag" ? " is-active" : "")}
+                      onClick={() => { setSelDay(d); setView("dag"); }}
+                    >
                       {fmtDay(d)}
                     </button>
                   ))}
-                  <button onClick={() => setView("snitt")}
-                    style={{
-                      background: view === "snitt" ? C.blue : C.panel,
-                      border: "1px solid " + (view === "snitt" ? C.blue : C.border2),
-                      color: view === "snitt" ? "#fff" : C.textDim,
-                      borderRadius: 5, padding: "5px 10px", fontSize: 11,
-                      fontFamily: "monospace", fontWeight: view === "snitt" ? 700 : 400,
-                      cursor: "pointer", marginLeft: 6,
-                    }}>
+                  <button
+                    className={"historik__snitt-btn" + (view === "snitt" ? " is-active" : "")}
+                    onClick={() => setView("snitt")}
+                  >
                     Månadssnitt
                   </button>
-                  <ActionButton onClick={() => {
-                    const nh = { ...history };
-                    if (selDay && selMonth) {
-                      delete nh[selMonth][selDay];
-                      if (!Object.keys(nh[selMonth]).length) delete nh[selMonth];
-                      saveHistory(nh);
-                      setHistory(nh);
-                      const months = Object.keys(nh).sort();
-                      if (months.length) {
-                        const lm = months[months.length - 1];
-                        setSelMonth(lm);
-                        const days = Object.keys(nh[lm]).sort();
-                        setSelDay(days[days.length - 1] || null);
-                      } else {
-                        setSelMonth(null); setSelDay(null);
+                  <ActionButton
+                    style={{ marginLeft: "auto" }}
+                    onClick={() => {
+                      const nh = { ...history };
+                      if (selDay && selMonth) {
+                        delete nh[selMonth][selDay];
+                        if (!Object.keys(nh[selMonth]).length) delete nh[selMonth];
+                        saveHistory(nh);
+                        setHistory(nh);
+                        const months = Object.keys(nh).sort();
+                        if (months.length) {
+                          const lm = months[months.length - 1];
+                          setSelMonth(lm);
+                          const days = Object.keys(nh[lm]).sort();
+                          setSelDay(days[days.length - 1] || null);
+                        } else {
+                          setSelMonth(null); setSelDay(null);
+                        }
                       }
-                    }
-                  }}
-                    style={{ marginLeft: "auto" }}>
+                    }}
+                  >
                     Ta bort dag
                   </ActionButton>
                 </div>
 
-                {/* Dag-vy */}
                 {view === "dag" && dayData && (
-                  <div key={selDay} style={{ animation: "fade-up 0.2s ease" }}>
+                  <div key={selDay} className="anim-fade-up">
                     <MetricGrid columns={5}>
                       {[
                         { l: "PERS", v: dayData.summary.pers },
@@ -373,9 +355,8 @@ export default function Historik() {
                   </div>
                 )}
 
-                {/* Snitt-vy */}
                 {view === "snitt" && monthAgg && (
-                  <Panel key="snitt" title={"MÅNADSSNITT - " + fmtMonth(selMonth) + " (" + monthDays.length + " dagar)"} accent="blue" flush>
+                  <Panel key="snitt" title={"MÅNADSSNITT — " + fmtMonth(selMonth) + " (" + monthDays.length + " dagar)"} accent="blue" flush>
                     <SnitTabell agg={monthAgg} />
                   </Panel>
                 )}

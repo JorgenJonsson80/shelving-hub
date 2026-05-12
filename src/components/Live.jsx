@@ -78,21 +78,21 @@ function parseLive(file) {
 }
 
 function FlowBar({ iko, pavag, klart, total }) {
-  if (!total) return <div style={{ color: C.dim, fontSize: 12 }}>Ingen data</div>;
+  if (!total) return <div style={{ color: "var(--dim)", fontSize: 12 }}>Ingen data</div>;
   const pI = (iko / total) * 100;
   const pP = (pavag / total) * 100;
   const pK = (klart / total) * 100;
   return (
     <div>
       <div className="flow-bar__track">
-        <div className="flow-bar__segment" style={{ width: pI + "%", background: C.red }} />
-        <div className="flow-bar__segment" style={{ width: pP + "%", background: C.yellow }} />
-        <div className="flow-bar__segment" style={{ width: pK + "%", background: C.green }} />
+        <div className="flow-bar__segment" style={{ width: pI + "%", background: "var(--red)" }} />
+        <div className="flow-bar__segment" style={{ width: pP + "%", background: "var(--yellow)" }} />
+        <div className="flow-bar__segment" style={{ width: pK + "%", background: "var(--green)" }} />
       </div>
       <div className="flow-bar__legend">
-        <span style={{ color: C.red }}>Iko {iko}</span>
-        <span style={{ color: C.yellow }}>Väg {pavag}</span>
-        <span style={{ color: C.green }}>Klart {klart}</span>
+        <span style={{ color: "var(--red)" }}>Iko {iko}</span>
+        <span style={{ color: "var(--yellow)" }}>Väg {pavag}</span>
+        <span style={{ color: "var(--green)" }}>Klart {klart}</span>
         <span className="flow-bar__total">Tot {total}</span>
       </div>
     </div>
@@ -125,13 +125,13 @@ export default function Live() {
         title="Infattningsstatus"
         subtitle="Följ K-banor, påfyllningar, kartonger och helpallar från Visualisering-filen."
         actions={data && (
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 11, color: C.dim }}>{data.fileName}</div>
-            <div style={{ fontSize: 11, color: C.textDim, marginTop: 2 }}>
+          <div className="file-meta">
+            <div className="file-meta__name">{data.fileName}</div>
+            <div className="file-meta__loaded">
               Laddad {data.loaded} ·{" "}
-              <label style={{ color: C.accent, cursor: "pointer" }}>
+              <label className="file-meta__change">
                 Byt fil
-                <input type="file" accept=".xlsx" style={{ display: "none" }}
+                <input type="file" accept=".xlsx" className="visually-hidden-input"
                   onChange={e => { if (e.target.files[0]) handleFile(e.target.files[0]); }} />
               </label>
             </div>
@@ -158,7 +158,7 @@ export default function Live() {
       )}
 
       {data && (
-        <div style={{ animation: "fade-up 0.25s ease" }}>
+        <div className="anim-fade-up">
           <div className="kbana-grid">
             {data.kbanor.map(kb => (
               <Panel key={kb.kbana} className="kbana-card" flush>
@@ -175,13 +175,13 @@ export default function Live() {
                   </div>
                   <FlowBar {...kb.pafyll} />
                   {kb.kart && (
-                    <div style={{ marginTop: 16 }}>
+                    <div className="block-spacer">
                       <div className="block-label">KARTONGER</div>
                       <FlowBar {...kb.kart} />
                     </div>
                   )}
                   {data.pallarPerK[kb.kbana] && data.pallarPerK[kb.kbana].total > 0 && (
-                    <div style={{ marginTop: 16 }}>
+                    <div className="block-spacer">
                       <div className="block-label">HELPALLAR</div>
                       <FlowBar {...data.pallarPerK[kb.kbana]} />
                     </div>
@@ -193,7 +193,7 @@ export default function Live() {
 
           {data.total && data.total.pafyll.total > 0 && (
             <Panel title="TOTALT" className="live-total">
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+              <div className="live-total__grid">
                 <div>
                   <div className="block-label">PÅFYLLNINGAR</div>
                   <FlowBar {...data.total.pafyll} />

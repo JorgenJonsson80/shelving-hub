@@ -135,7 +135,7 @@ export default function Brief() {
       )}
 
       {parsed && (
-        <div style={{ animation: "fade-up 0.25s ease" }}>
+        <div className="anim-fade-up">
           <MetricGrid columns={4}>
             {[
               { l: "PERS", v: parsed.rows.reduce((s, r) => s + r.pers, 0).toFixed(1) },
@@ -190,24 +190,18 @@ export default function Brief() {
 
           {brief && (
             <Panel title="AI-ANALYS" className="ai-panel">
-              <div style={{ fontSize: 13, lineHeight: 1.9, color: C.text, whiteSpace: "pre-wrap", fontFamily: "sans-serif" }}>{brief}</div>
-              <div style={{ display: "flex", gap: 8, marginTop: 16, paddingTop: 14, borderTop: "1px solid " + C.border }}>
-                <ActionButton onClick={generateBrief}>
-                  Ny analys
-                </ActionButton>
-                <ActionButton onClick={() => { setParsed(null); setBrief(null); }}>
-                  Ny fil
-                </ActionButton>
+              <div className="brief-text">{brief}</div>
+              <div className="brief-actions">
+                <ActionButton onClick={generateBrief}>Ny analys</ActionButton>
+                <ActionButton onClick={() => { setParsed(null); setBrief(null); }}>Ny fil</ActionButton>
               </div>
             </Panel>
           )}
 
           {!brief && (
-            <div style={{ marginTop: 12 }}>
-              <ActionButton onClick={() => { setParsed(null); setBrief(null); }}>
+            <ActionButton onClick={() => { setParsed(null); setBrief(null); }}>
               Ny fil
-              </ActionButton>
-            </div>
+            </ActionButton>
           )}
         </div>
       )}
