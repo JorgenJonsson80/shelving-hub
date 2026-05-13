@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { C } from "../shared/theme";
 import { ActionButton, Alert, Dropzone, PageHeader, Panel } from "../shared/components";
+import { callAI } from "../shared/api";
 
 const CELL_MAP = {
   kbanor: [
@@ -287,21 +288,8 @@ ${banorText}
 
 Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd och varför 3) Konkreta rekommendationer (max 3 punkter). Max 200 ord. Rakt och operativt — inga onödiga ord.`;
 
-    fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 600,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    })
-      .then(r => r.json())
-      .then(d => { setAiResult(d.content?.map(b => b.text || "").join("") || "Inget svar."); setAiLoading(false); })
+    callAI([{ role: "user", content: prompt }], 600)
+      .then(text => { setAiResult(text); setAiLoading(false); })
       .catch(e => { setAiErr("API-fel: " + e.message); setAiLoading(false); });
   };
 

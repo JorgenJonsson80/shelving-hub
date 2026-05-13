@@ -15,6 +15,7 @@ import {
   PrestBar,
 } from "../shared/components";
 import { parseDailyRows } from "../shared/parseDailyRows";
+import { callAI } from "../shared/api";
 
 function parseDailyFile(file) {
   return new Promise((resolve, reject) => {
@@ -88,24 +89,8 @@ export default function Brief() {
 
     const prompt = "Du ar operativ analytiker pa ett svensk lager. Analysera gardagens shelving-data och ge en kort direkt morgenbriefing pa svenska.\n\nPer bana:\n" + banorText + "\n\nGrand total scan: " + (parsed.grandTotal ? (parsed.grandTotal * 100).toFixed(0) + "%" : "okand") + "\n\nScan-rate och prestation ar SEPARATA matt. Under 75% = lag, under 60% = kritisk. Prod = shelving-rader per person och timme (snitt ca 6, over 8 = bra, under 4 = lag). Bedomning kombinerar status och scan-rate.\n\nGe: 1) Lagestord 2) Kritiska banor 3) Overskott 4) Scan- och produktivitetsavvikelser 5) Rekommendation. Max 280 ord. Kort och direkt.";
 
-    fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": import.meta.env.VITE_ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    })
-      .then(r => r.json())
-      .then(d => {
-        setBrief(d.content?.map(b => b.text || "").join("") || "Inget svar.");
-        setLoading(false);
-      })
+    callAI([{ role: "user", content: prompt }], 1000)
+      .then(text => { setBrief(text); setLoading(false); })
       .catch(e => { setErr("API-fel: " + e.message); setLoading(false); });
   };
 
