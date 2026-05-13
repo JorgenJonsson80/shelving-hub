@@ -72,20 +72,39 @@ function toMins(str) {
   return h * 60 + (m || 0);
 }
 
-function getTimeProgress(sched) {
-  if (!sched || sched.length === 0) return null;
-  const now = new Date();
-  const nowMins = now.getHours() * 60 + now.getMinutes();
-  let elapsed = 0, totalMins = 0;
+function getShiftBounds(sched) {
+  let lo = Infinity, hi = -Infinity;
   for (const w of sched) {
-    const s = toMins(w.start);
-    const e = toMins(w.end);
+    const s = toMins(w.start), e = toMins(w.end);
     if (s == null || e == null || e <= s) continue;
-    totalMins += e - s;
-    elapsed += Math.max(0, Math.min(nowMins, e) - s);
+    lo = Math.min(lo, s); hi = Math.max(hi, e);
   }
-  if (totalMins === 0) return null;
-  return elapsed / totalMins;
+  return lo === Infinity ? null : { startMins: lo, endMins: hi };
+}
+
+function getWorkerStatus(sched, nowMins) {
+  let active = 0, planned = 0;
+  for (const w of sched) {
+    const s = toMins(w.start), e = toMins(w.end);
+    if (s == null || e == null || e <= s) continue;
+    planned++;
+    if (nowMins >= s && nowMins < e) active++;
+  }
+  return { active, planned };
+}
+
+// Returns { faktiskt, kravs } in påfyllningar/h, or null fields if can't compute
+function getTempo(flow, sched, nowMins) {
+  if (!sched || !sched.length || !flow || !flow.total) return null;
+  const bounds = getShiftBounds(sched);
+  if (!bounds) return null;
+  const { startMins, endMins } = bounds;
+  const elapsedH  = Math.max(0, nowMins - startMins) / 60;
+  const remainH   = Math.max(0, endMins   - nowMins) / 60;
+  return {
+    faktiskt: elapsedH  > 0.05 ? flow.klart / elapsedH             : null,
+    kravs:    remainH   > 0.05 ? (flow.total - flow.klart) / remainH : null,
+  };
 }
 
 function parseStaffingFile(file) {
@@ -124,19 +143,14 @@ function parseLive(file) {
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const R = XLSX.utils.sheet_to_json(sheet, { defval: "", header: 1 });
         const kbanor = CELL_MAP.kbanor.map(def => ({
-          kbana: def.kbana,
-          line:  def.line,
-          isPL:  def.isPL,
+          kbana: def.kbana, line: def.line, isPL: def.isPL,
           pafyll: readFlow(R, def.pafyll),
           kart:   def.kart ? readFlow(R, def.kart) : null,
         }));
         const pallarPerK = Object.fromEntries(
           Object.entries(CELL_MAP.pallarPerK).map(([k, coords]) => [k, readFlow(R, coords)])
         );
-        const total = {
-          pafyll: readFlow(R, CELL_MAP.total.pafyll),
-          kart:   readFlow(R, CELL_MAP.total.kart),
-        };
+        const total = { pafyll: readFlow(R, CELL_MAP.total.pafyll), kart: readFlow(R, CELL_MAP.total.kart) };
         const allZero = kbanor.every(k => k.pafyll.total === 0 && !k.isPL);
         if (allZero) throw new Error("Alla värden är noll — fel fil eller flik? Kontrollera att det är Visualisering-filen (Infattning SDS).");
         const active = kbanor.filter(k => k.pafyll.total > 0 || k.isPL);
@@ -148,17 +162,16 @@ function parseLive(file) {
   });
 }
 
+// ── UI components ──────────────────────────────────────────
+
 function FlowBar({ iko, pavag, klart, total }) {
   if (!total) return <div style={{ color: "var(--dim)", fontSize: 12 }}>Ingen data</div>;
-  const pI = (iko / total) * 100;
-  const pP = (pavag / total) * 100;
-  const pK = (klart / total) * 100;
   return (
     <div>
       <div className="flow-bar__track">
-        <div className="flow-bar__segment" style={{ width: pI + "%", background: "var(--red)" }} />
-        <div className="flow-bar__segment" style={{ width: pP + "%", background: "var(--yellow)" }} />
-        <div className="flow-bar__segment" style={{ width: pK + "%", background: "var(--green)" }} />
+        <div className="flow-bar__segment" style={{ width: (iko / total * 100) + "%",   background: "var(--red)" }} />
+        <div className="flow-bar__segment" style={{ width: (pavag / total * 100) + "%", background: "var(--yellow)" }} />
+        <div className="flow-bar__segment" style={{ width: (klart / total * 100) + "%", background: "var(--green)" }} />
       </div>
       <div className="flow-bar__legend">
         <span style={{ color: "var(--red)" }}>I kö {iko}</span>
@@ -180,19 +193,99 @@ function StatusPill({ total, iko, klart }) {
   );
 }
 
-function AheadBehindPill({ flow, sched }) {
-  const timeProg = getTimeProgress(sched);
-  if (timeProg == null || !flow || !flow.total) return null;
-  const flowProg = flow.klart / flow.total;
+function AheadBehindPill({ flow, sched, nowMins }) {
+  const tempo = getTempo(flow, sched, nowMins);
+  if (!tempo) return null;
+  // Compare flow progress % vs elapsed time %
+  const bounds = getShiftBounds(sched);
+  if (!bounds) return null;
+  const totalShiftMins = bounds.endMins - bounds.startMins;
+  const elapsedMins = Math.max(0, nowMins - bounds.startMins);
+  const timeProg = totalShiftMins > 0 ? elapsedMins / totalShiftMins : 0;
+  const flowProg = flow.total > 0 ? flow.klart / flow.total : 0;
   const delta = flowProg - timeProg;
   let label, color;
-  if (delta > 0.08)       { label = `FÖRE +${Math.round(delta * 100)}%`; color = C.green; }
-  else if (delta < -0.08) { label = `EFTER ${Math.round(delta * 100)}%`; color = C.red; }
+  if      (delta >  0.08) { label = `FÖRE +${Math.round(delta * 100)}%`; color = C.green;  }
+  else if (delta < -0.08) { label = `EFTER ${Math.round(delta * 100)}%`; color = C.red;    }
   else                    { label = "I TID";                              color = C.yellow; }
   return (
     <span className="progress-pill" style={{ color, background: color + "20", border: "1px solid " + color + "44" }}>
       {label}
     </span>
+  );
+}
+
+function TempoRow({ flow, sched, nowMins }) {
+  const tempo = getTempo(flow, sched, nowMins);
+  if (!tempo || (tempo.faktiskt == null && tempo.kravs == null)) return null;
+  const { faktiskt, kravs } = tempo;
+  const color = faktiskt != null && kravs != null
+    ? (faktiskt >= kravs ? C.green : faktiskt >= kravs * 0.8 ? C.yellow : C.red)
+    : "var(--text-dim)";
+  return (
+    <div className="tempo-row">
+      {faktiskt != null && (
+        <span className="tempo-val">
+          <span style={{ color, fontWeight: 800 }}>{faktiskt.toFixed(1)}</span>
+          <span className="tempo-unit"> pf/h</span>
+          <span className="tempo-lbl">faktiskt</span>
+        </span>
+      )}
+      {kravs != null && (
+        <span className="tempo-val">
+          <span style={{ color: "var(--text)", fontWeight: 800 }}>{kravs.toFixed(1)}</span>
+          <span className="tempo-unit"> pf/h</span>
+          <span className="tempo-lbl">behövs</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ScheduleOverview({ kbanor, schedule, nowMins }) {
+  const items = kbanor.filter(kb => !kb.isPL).map(kb => {
+    const sched = schedule[kb.kbana] || [];
+    if (!sched.length) return { kbana: kb.kbana, status: "none" };
+    const bounds = getShiftBounds(sched);
+    const { active, planned } = getWorkerStatus(sched, nowMins);
+    if (!bounds) return { kbana: kb.kbana, status: "none" };
+    if (nowMins < bounds.startMins) return { kbana: kb.kbana, status: "upcoming", active, planned, minsUntil: bounds.startMins - nowMins };
+    if (nowMins >= bounds.endMins)  return { kbana: kb.kbana, status: "done",     active, planned };
+    return { kbana: kb.kbana, status: active > 0 ? "active" : "missing", active, planned };
+  });
+
+  if (items.every(i => i.status === "none")) return null;
+
+  const missing = items.filter(i => i.status === "missing").map(i => i.kbana);
+
+  return (
+    <Panel title="SCHEMAÖVERSIKT" className="schedule-overview">
+      <div className="schedule-overview__grid">
+        {items.map(({ kbana, status, active, planned, minsUntil }) => {
+          let color, label;
+          if      (status === "active")   { color = C.green;              label = `${active}/${planned} pers`; }
+          else if (status === "missing")  { color = C.red;                label = "SAKNAS"; }
+          else if (status === "upcoming") {
+            color = C.yellow;
+            const h = Math.floor(minsUntil / 60), m = minsUntil % 60;
+            label = `om ${h > 0 ? h + "h " : ""}${m}min`;
+          }
+          else if (status === "done")     { color = "var(--dim)";         label = "Avslutat"; }
+          else                            { color = "var(--border-2)";    label = "–"; }
+          return (
+            <div key={kbana} className="schedule-chip" style={{ borderColor: color + "55" }}>
+              <span className="schedule-chip__name" style={{ color: "var(--text-dim)" }}>{kbana}</span>
+              <span className="schedule-chip__val" style={{ color }}>{label}</span>
+            </div>
+          );
+        })}
+      </div>
+      {missing.length > 0 && (
+        <div className="schedule-overview__alert">
+          Obemannade nu: {missing.join(", ")}
+        </div>
+      )}
+    </Panel>
   );
 }
 
@@ -202,21 +295,30 @@ function ls(key, fallback) {
 }
 
 export default function Live() {
-  const [data,           setData]           = useState(null);
-  const [err,            setErr]            = useState(null);
-  const [drag,           setDrag]           = useState(false);
-  const [staffing,       setStaffing]       = useState(null);
-  const [staffErr,       setStaffErr]       = useState(null);
-  const [manualBemanning,setManualBemanning]= useState(() => ls("live_bemanning", {}));
-  const [manualPall,     setManualPall]     = useState(() => ls("live_pall", {}));
-  const [schedule,       setSchedule]       = useState(() => ls("live_schedule", {}));
-  const [aiResult,       setAiResult]       = useState(null);
-  const [aiLoading,      setAiLoading]      = useState(false);
-  const [aiErr,          setAiErr]          = useState(null);
+  const [data,            setData]            = useState(null);
+  const [err,             setErr]             = useState(null);
+  const [drag,            setDrag]            = useState(false);
+  const [staffing,        setStaffing]        = useState(null);
+  const [staffErr,        setStaffErr]        = useState(null);
+  const [manualBemanning, setManualBemanning] = useState(() => ls("live_bemanning", {}));
+  const [manualPall,      setManualPall]      = useState(() => ls("live_pall", {}));
+  const [schedule,        setSchedule]        = useState(() => ls("live_schedule", {}));
+  const [aiResult,        setAiResult]        = useState(null);
+  const [aiLoading,       setAiLoading]       = useState(false);
+  const [aiErr,           setAiErr]           = useState(null);
+  const [now,             setNow]             = useState(() => new Date());
+
+  // Tick every 30 s so tempo/schedule refresh without page reload
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => { localStorage.setItem("live_bemanning", JSON.stringify(manualBemanning)); }, [manualBemanning]);
   useEffect(() => { localStorage.setItem("live_pall",      JSON.stringify(manualPall));      }, [manualPall]);
   useEffect(() => { localStorage.setItem("live_schedule",  JSON.stringify(schedule));        }, [schedule]);
+
+  const nowMins = now.getHours() * 60 + now.getMinutes();
 
   const handleFile = (f) => {
     setErr(null);
@@ -230,11 +332,9 @@ export default function Live() {
       const nm = Object.fromEntries(rows.map(r => [normKbana(r.kbana), r]));
       setManualBemanning(prev => {
         const next = { ...prev };
-        if (data) {
-          for (const kb of data.kbanor) {
-            const s = nm[normKbana(kb.kbana)];
-            if (s) next[kb.kbana] = s.bemanning;
-          }
+        if (data) for (const kb of data.kbanor) {
+          const s = nm[normKbana(kb.kbana)];
+          if (s) next[kb.kbana] = s.bemanning;
         }
         return next;
       });
@@ -248,45 +348,50 @@ export default function Live() {
   const setPallVal = (kbana, field, val) =>
     setManualPall(prev => ({ ...prev, [kbana]: { ...(prev[kbana] || {}), [field]: val === "" ? "" : +val } }));
 
-  const addWorker = (kbana) =>
-    setSchedule(prev => ({ ...prev, [kbana]: [...(prev[kbana] || []), { start: "", end: "" }] }));
-
-  const updateWorker = (kbana, idx, field, val) =>
-    setSchedule(prev => {
-      const list = [...(prev[kbana] || [])];
-      list[idx] = { ...list[idx], [field]: val };
-      return { ...prev, [kbana]: list };
-    });
-
-  const removeWorker = (kbana, idx) =>
-    setSchedule(prev => ({ ...prev, [kbana]: (prev[kbana] || []).filter((_, i) => i !== idx) }));
+  const addWorker    = (kbana)           => setSchedule(prev => ({ ...prev, [kbana]: [...(prev[kbana] || []), { start: "", end: "" }] }));
+  const removeWorker = (kbana, idx)      => setSchedule(prev => ({ ...prev, [kbana]: (prev[kbana] || []).filter((_, i) => i !== idx) }));
+  const updateWorker = (kbana, idx, f, v) => setSchedule(prev => {
+    const list = [...(prev[kbana] || [])]; list[idx] = { ...list[idx], [f]: v }; return { ...prev, [kbana]: list };
+  });
 
   const analyzeNow = () => {
     if (!data) return;
     setAiLoading(true); setAiResult(null); setAiErr(null);
-    const nowStr = new Date().toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+
+    const nowStr = now.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+    const activeKbanor = data.kbanor.filter(kb => !kb.isPL);
+    const allUnstaffed = activeKbanor.every(kb => !manualBemanning[kb.kbana] || +manualBemanning[kb.kbana] === 0);
+    const allNoSchedule = activeKbanor.every(kb => !(schedule[kb.kbana] || []).length);
 
     const banorText = data.kbanor.map(kb => {
-      const sched = schedule[kb.kbana] || [];
-      const timeProg = getTimeProgress(sched);
+      const sched  = schedule[kb.kbana] || [];
+      const { active, planned } = getWorkerStatus(sched, nowMins);
+      const tempo  = getTempo(kb.pafyll, sched, nowMins);
       const pallFile = data.pallarPerK[kb.kbana];
       const pallMan  = manualPall[kb.kbana];
       const pallIko   = +(pallMan?.iko   ?? pallFile?.iko   ?? 0);
       const pallPavag = +(pallMan?.pavag ?? pallFile?.pavag ?? 0);
       const pallKlart = +(pallMan?.klart ?? pallFile?.klart ?? 0);
-      const pallTotal = pallIko + pallPavag + pallKlart;
+      const pers = manualBemanning[kb.kbana] || 0;
       const flowPct = kb.pafyll.total > 0 ? ((kb.pafyll.klart / kb.pafyll.total) * 100).toFixed(0) + "%" : "?";
-      const timePct = timeProg != null ? (timeProg * 100).toFixed(0) + "%" : "?";
-      const pers = manualBemanning[kb.kbana] ?? "?";
-      return `${kb.kbana}(${kb.line}): Påfyll ${kb.pafyll.klart}/${kb.pafyll.total}(${flowPct}), Kart ${kb.kart?.klart ?? 0}/${kb.kart?.total ?? 0}, Pall ikö=${pallIko} påväg=${pallPavag} klart=${pallKlart}/${pallTotal}, Pers=${pers}, Schema=${timePct}`;
+      const tempoStr = tempo?.faktiskt != null
+        ? `Tempo: ${tempo.faktiskt.toFixed(1)} pf/h (behövs ${tempo.kravs?.toFixed(1) ?? "?"} pf/h)`
+        : "Inget schema";
+      const schedStr = planned > 0 ? `${active}/${planned} aktiva` : "Inget schema";
+      return `${kb.kbana}: Påfyll ${kb.pafyll.klart}/${kb.pafyll.total}(${flowPct}), Kart ${kb.kart?.klart ?? 0}/${kb.kart?.total ?? 0}, Pall ikö=${pallIko} klart=${pallKlart}, Pers=${pers}, Schema=${schedStr}, ${tempoStr}`;
     }).join("\n");
+
+    let warnings = "";
+    if (allUnstaffed) warnings += "\nVARNING: Ingen K-bana har bemanning registrerad — påminn användaren att fylla i personal!";
+    if (allNoSchedule) warnings += "\nVARNING: Inga arbetstider inlagda — tempo och framsteg kan inte beräknas.";
 
     const prompt = `Du är operativ ledare på ett lager. Klockan är ${nowStr}. Analysera nuläget och ge KORTA, DIREKTA råd på svenska.
 
 K-bana status:
 ${banorText}
+${warnings}
 
-Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd och varför 3) Konkreta rekommendationer (max 3 punkter). Max 200 ord. Rakt och operativt — inga onödiga ord.`;
+Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd och varför 3) Konkreta rekommendationer (max 3 punkter). Max 200 ord. Rakt och operativt.`;
 
     callAI([{ role: "user", content: prompt }], 600)
       .then(text => { setAiResult(text); setAiLoading(false); })
@@ -299,7 +404,11 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
         live
         eyebrow="Live - nuläge"
         title="Infattningsstatus"
-        subtitle="Följ K-banor, påfyllningar, kartonger och pallar. Scheman och AI-analys sparas lokalt."
+        subtitle={
+          data
+            ? `${now.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} — uppdateras var 30:e sekund`
+            : "Följ K-banor, påfyllningar, kartonger och pallar."
+        }
         actions={data && (
           <div className="file-meta">
             <div className="file-meta__name">{data.fileName}</div>
@@ -321,33 +430,35 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
         )}
       />
 
-      {err && <Alert>{err}</Alert>}
+      {err     && <Alert>{err}</Alert>}
       {staffErr && <Alert>{staffErr}</Alert>}
 
       {!data && (
         <div onDragEnter={() => setDrag(true)} onDragLeave={() => setDrag(false)} onDrop={() => setDrag(false)}>
-          <Dropzone
-            icon="L"
-            title="Släpp Visualisering-filen här"
-            subtitle="Infattning SDS .xlsx"
-            dragging={drag}
-            onFile={handleFile}
-          />
+          <Dropzone icon="L" title="Släpp Visualisering-filen här" subtitle="Infattning SDS .xlsx" dragging={drag} onFile={handleFile} />
         </div>
       )}
 
       {data && (
         <div className="anim-fade-up">
+          {/* Real-time schedule overview */}
+          <ScheduleOverview kbanor={data.kbanor} schedule={schedule} nowMins={nowMins} />
+
           <div className="kbana-grid">
             {data.kbanor.map(kb => {
               const pallFile = data.pallarPerK[kb.kbana];
               const pallMan  = manualPall[kb.kbana];
-              const hasManualPall = pallMan && Object.values(pallMan).some(v => v !== "" && v > 0);
+              const hasManualPall = pallMan && Object.values(pallMan).some(v => v !== "" && +v > 0);
               const pallFlow = hasManualPall
                 ? { iko: +(pallMan.iko||0), pavag: +(pallMan.pavag||0), klart: +(pallMan.klart||0), total: +(pallMan.iko||0) + +(pallMan.pavag||0) + +(pallMan.klart||0) }
                 : pallFile && pallFile.total > 0 ? pallFile : null;
 
               const sched = schedule[kb.kbana] || [];
+              const { active: activeWorkers, planned: plannedWorkers } = getWorkerStatus(sched, nowMins);
+              const workerColor = !plannedWorkers ? "var(--dim)"
+                : activeWorkers === 0 ? C.red
+                : activeWorkers < plannedWorkers ? C.yellow
+                : C.green;
 
               return (
                 <Panel key={kb.kbana} className="kbana-card" flush>
@@ -357,7 +468,7 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
                       <span className="kbana-card__meta">{kb.line}</span>
                     </div>
                     <div className="kbana-card__pills">
-                      <AheadBehindPill flow={kb.pafyll} sched={sched} />
+                      <AheadBehindPill flow={kb.pafyll} sched={sched} nowMins={nowMins} />
                       <StatusPill {...kb.pafyll} />
                     </div>
                   </div>
@@ -368,15 +479,15 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
                     {staffingMap?.[normKbana(kb.kbana)]?.p2 > 0 && <span className="staffing-shift">P2</span>}
                     {staffingMap?.[normKbana(kb.kbana)]?.p3 > 0 && <span className="staffing-shift">P3</span>}
                     {staffingMap?.[normKbana(kb.kbana)]?.p8 > 0 && <span className="staffing-shift">P8</span>}
+                    {plannedWorkers > 0 && (
+                      <span className="staffing-shift" style={{ borderColor: workerColor + "44", background: workerColor + "15", color: workerColor }}>
+                        {activeWorkers}/{plannedWorkers} nu
+                      </span>
+                    )}
                     <div className="staffing-manual">
-                      <input
-                        type="number" min="0" step="0.5"
-                        className="staffing-input"
-                        value={manualBemanning[kb.kbana] ?? ""}
-                        placeholder="–"
-                        onChange={e => setManualBemanning(prev => ({
-                          ...prev, [kb.kbana]: e.target.value === "" ? "" : +e.target.value,
-                        }))}
+                      <input type="number" min="0" step="0.5" className="staffing-input"
+                        value={manualBemanning[kb.kbana] ?? ""} placeholder="–"
+                        onChange={e => setManualBemanning(prev => ({ ...prev, [kb.kbana]: e.target.value === "" ? "" : +e.target.value }))}
                       />
                       <span className="staffing-label">pers</span>
                     </div>
@@ -394,15 +505,14 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
                         <button className="remove-worker-btn" onClick={() => removeWorker(kb.kbana, i)}>×</button>
                       </div>
                     ))}
-                    <button className="add-worker-btn" onClick={() => addWorker(kb.kbana)}>
-                      + Arbetstid
-                    </button>
+                    <button className="add-worker-btn" onClick={() => addWorker(kb.kbana)}>+ Arbetstid</button>
                   </div>
 
                   {/* Flow body */}
                   <div className="kbana-card__body">
                     <div className="block-label">{kb.isPL ? "PALLAR" : "PÅFYLLNINGAR"}</div>
                     <FlowBar {...kb.pafyll} />
+                    <TempoRow flow={kb.pafyll} sched={sched} nowMins={nowMins} />
 
                     {kb.kart && (
                       <div className="block-spacer">
@@ -418,22 +528,19 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
                           <div className="pall-manual__field">
                             <span className="pall-manual__lbl" style={{ color: "var(--red)" }}>I KÖ</span>
                             <input type="number" min="0" className="pall-input"
-                              value={pallMan?.iko ?? ""}
-                              placeholder={pallFile?.iko ?? "0"}
+                              value={pallMan?.iko ?? ""} placeholder={pallFile?.iko ?? "0"}
                               onChange={e => setPallVal(kb.kbana, "iko", e.target.value)} />
                           </div>
                           <div className="pall-manual__field">
                             <span className="pall-manual__lbl" style={{ color: "var(--yellow)" }}>PÅ VÄG</span>
                             <input type="number" min="0" className="pall-input"
-                              value={pallMan?.pavag ?? ""}
-                              placeholder={pallFile?.pavag ?? "0"}
+                              value={pallMan?.pavag ?? ""} placeholder={pallFile?.pavag ?? "0"}
                               onChange={e => setPallVal(kb.kbana, "pavag", e.target.value)} />
                           </div>
                           <div className="pall-manual__field">
                             <span className="pall-manual__lbl" style={{ color: "var(--green)" }}>KLART</span>
                             <input type="number" min="0" className="pall-input"
-                              value={pallMan?.klart ?? ""}
-                              placeholder={pallFile?.klart ?? "0"}
+                              value={pallMan?.klart ?? ""} placeholder={pallFile?.klart ?? "0"}
                               onChange={e => setPallVal(kb.kbana, "klart", e.target.value)} />
                           </div>
                         </div>
@@ -465,12 +572,10 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
             <ActionButton onClick={analyzeNow} disabled={aiLoading} style={{ flex: 1 }}>
               {aiLoading ? "Analyserar..." : "Analysera nuläge med AI"}
             </ActionButton>
-            <ActionButton onClick={() => setData(null)}>
-              Ladda ny fil
-            </ActionButton>
+            <ActionButton onClick={() => setData(null)}>Ladda ny fil</ActionButton>
           </div>
 
-          {aiErr && <Alert>{aiErr}</Alert>}
+          {aiErr    && <Alert>{aiErr}</Alert>}
           {aiResult && (
             <Panel title="AI-ANALYS" className="ai-panel">
               <div style={{ whiteSpace: "pre-wrap", color: "var(--text)", fontSize: 13, lineHeight: 1.65 }}>
