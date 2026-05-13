@@ -67,17 +67,17 @@ function parseDailyFile(file) {
         }
 
         const kbanaRows = parseDailyRows(raw);
-        const sr = raw.find(r => String(r[0]).toLowerCase() === "summa") || [];
+        const n = kbanaRows.length || 1;
         resolve({
           dateStr,
           fileName: file.name,
           rows: kbanaRows,
           summary: {
-            pers: +sr[5] || 0,
-            kolli: +sr[2] || 0,
-            kart: +sr[3] || 0,
-            gap: +sr[9] || 0,
-            prest: +sr[8] || 0,
+            pers:  kbanaRows.reduce((s, r) => s + r.pers,  0),
+            kolli: kbanaRows.reduce((s, r) => s + r.kolli, 0),
+            kart:  kbanaRows.reduce((s, r) => s + r.kart,  0),
+            gap:   kbanaRows.reduce((s, r) => s + r.gap,   0),
+            prest: kbanaRows.reduce((s, r) => s + r.prest, 0) / n,
           },
         });
       } catch (err) { reject(err); }

@@ -81,11 +81,12 @@ export default function Brief() {
       ", Prest=" + (r.prest * 100).toFixed(1) + "%" +
       ", Kolli=" + r.kolli +
       ", Kart=" + r.kart +
+      ", Prod=" + (r.produktivitet != null ? r.produktivitet.toFixed(1) : "okand") +
       ", Scan=" + (r.scannat != null ? (r.scannat * 100).toFixed(0) + "%" : "okand") +
       ", Bedomning=" + (r.bedoming || "-")
     ).join("\n");
 
-    const prompt = "Du ar operativ analytiker pa ett svensk lager. Analysera gardagens shelving-data och ge en kort direkt morgenbriefing pa svenska.\n\nPer bana:\n" + banorText + "\n\nGrand total scan: " + (parsed.grandTotal ? (parsed.grandTotal * 100).toFixed(0) + "%" : "okand") + "\n\nScan-rate och prestation ar SEPARATA matt. Under 75% = lag, under 60% = kritisk. Bedomning kombinerar status och scan-rate.\n\nGe: 1) Lagestord 2) Kritiska banor 3) Overskott 4) Scan-avvikelser 5) Rekommendation. Max 280 ord. Kort och direkt.";
+    const prompt = "Du ar operativ analytiker pa ett svensk lager. Analysera gardagens shelving-data och ge en kort direkt morgenbriefing pa svenska.\n\nPer bana:\n" + banorText + "\n\nGrand total scan: " + (parsed.grandTotal ? (parsed.grandTotal * 100).toFixed(0) + "%" : "okand") + "\n\nScan-rate och prestation ar SEPARATA matt. Under 75% = lag, under 60% = kritisk. Prod = shelving-rader per person och timme (snitt ca 6, over 8 = bra, under 4 = lag). Bedomning kombinerar status och scan-rate.\n\nGe: 1) Lagestord 2) Kritiska banor 3) Overskott 4) Scan- och produktivitetsavvikelser 5) Rekommendation. Max 280 ord. Kort och direkt.";
 
     fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -186,6 +187,7 @@ export default function Brief() {
               { label: "KART", align: "right" },
               { label: "PREST", align: "right" },
               { label: "GAP", align: "right" },
+              { label: "PROD", align: "right" },
               { label: "SCAN", align: "right" },
               { label: "BEDÖMNING", align: "right" },
             ]}>
@@ -201,6 +203,9 @@ export default function Brief() {
                       <td className="is-right mono-cell">{r.kart}</td>
                       <td className="is-right"><PrestBar prest={r.prest} /></td>
                       <td className="is-right"><GapChip gap={r.gap} /></td>
+                      <td className="is-right mono-cell" style={{ color: r.produktivitet != null && r.produktivitet < 4 ? C.yellow : C.textDim }}>
+                        {r.produktivitet != null ? r.produktivitet.toFixed(1) : "-"}
+                      </td>
                       <td className="is-right mono-cell" style={{ color: scanColor, fontWeight: scanPct !== null && scanPct < 75 ? 700 : 400 }}>
                         {scanPct != null ? scanPct + "%" : "-"}
                       </td>
