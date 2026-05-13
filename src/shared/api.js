@@ -1,18 +1,28 @@
-const PROXY_URL = import.meta.env.VITE_API_URL;   // set in GitHub secrets → proxy worker
-const API_KEY   = import.meta.env.VITE_ANTHROPIC_API_KEY; // only used for local dev
+const PROXY_URL = import.meta.env.VITE_API_URL;
+const API_KEY   = import.meta.env.VITE_ANTHROPIC_API_KEY;
+const IS_DEV    = import.meta.env.DEV;
 
 /**
- * Call Claude. Uses the proxy worker when VITE_API_URL is set (GitHub Pages),
- * falls back to direct Anthropic API for local development.
+ * Call Claude.
+ * - Dev (npm run dev): routes through Vite's /api proxy → api.anthropic.com (no CORS)
+ * - Prod with VITE_API_URL: routes through Cloudflare Worker (no CORS, key server-side)
+ * - Prod without VITE_API_URL: throws — set up the worker first
  */
 export async function callAI(messages, maxTokens = 1000) {
-  const url = PROXY_URL || "https://api.anthropic.com/v1/messages";
+  let url, headers;
 
-  const headers = { "Content-Type": "application/json" };
-  if (!PROXY_URL) {
-    // Local dev: call Anthropic directly with the key
-    headers["x-api-key"] = API_KEY;
-    headers["anthropic-version"] = "2023-06-01";
+  if (PROXY_URL) {
+    url = PROXY_URL;
+    headers = { "Content-Type": "application/json" };
+  } else if (IS_DEV) {
+    url = "/api/v1/messages";
+    headers = {
+      "Content-Type": "application/json",
+      "x-api-key": API_KEY,
+      "anthropic-version": "2023-06-01",
+    };
+  } else {
+    throw new Error("AI-funktionen kräver VITE_API_URL i produktion. Se worker/index.js.");
   }
 
   const resp = await fetch(url, {
