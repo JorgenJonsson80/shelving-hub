@@ -1,12 +1,10 @@
 const PROXY_URL = import.meta.env.VITE_API_URL;
 const API_KEY   = import.meta.env.VITE_ANTHROPIC_API_KEY;
-const IS_DEV    = import.meta.env.DEV;
 
 /**
  * Call Claude.
- * - Dev (npm run dev): routes through Vite's /api proxy → api.anthropic.com (no CORS)
- * - Prod with VITE_API_URL: routes through Cloudflare Worker (no CORS, key server-side)
- * - Prod without VITE_API_URL: throws — set up the worker first
+ * - With VITE_API_URL: routes through Cloudflare Worker (API key server-side, more secure)
+ * - Without: calls Anthropic directly from the browser using the required browser-access header
  */
 export async function callAI(messages, maxTokens = 1000) {
   let url, headers;
@@ -14,15 +12,14 @@ export async function callAI(messages, maxTokens = 1000) {
   if (PROXY_URL) {
     url = PROXY_URL;
     headers = { "Content-Type": "application/json" };
-  } else if (IS_DEV) {
-    url = "/api/v1/messages";
+  } else {
+    url = "https://api.anthropic.com/v1/messages";
     headers = {
       "Content-Type": "application/json",
       "x-api-key": API_KEY,
       "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
     };
-  } else {
-    throw new Error("AI-funktionen kräver VITE_API_URL i produktion. Se worker/index.js.");
   }
 
   const resp = await fetch(url, {
