@@ -1259,8 +1259,36 @@ body {
   font: 700 10px var(--font-mono);
 }
 
-.staffing-total {
+.staffing-manual {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
+}
+
+.staffing-input {
+  width: 36px;
+  padding: 2px 4px;
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  font: 800 11px var(--font-mono);
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.staffing-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.staffing-input::-webkit-outer-spin-button,
+.staffing-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+.staffing-label {
   color: var(--accent);
   font: 800 11px var(--font-mono);
 }

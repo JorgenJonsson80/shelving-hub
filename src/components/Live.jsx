@@ -54,7 +54,7 @@ const CELL_MAP = {
     "K58":  { iko:[67,50], pavag:[68,50], klart:[69,50], total:[70,50] },
     "K59":  { iko:[67,56], pavag:[68,56], klart:[69,56], total:[70,56] },
     "K60":  { iko:[67,61], pavag:[68,61], klart:[69,61], total:[70,61] },
-    "K61":  { iko:[67,74], pavag:[68,74], klart:[69,74], total:[70,74] },
+    "K61-7":  { iko:[67,74], pavag:[68,74], klart:[69,74], total:[70,74] },
   },
   total: {
     pafyll: { iko:[48,79], pavag:[50,79], klart:[52,79], total:[54,79] },
@@ -147,8 +147,8 @@ function FlowBar({ iko, pavag, klart, total }) {
         <div className="flow-bar__segment" style={{ width: pK + "%", background: "var(--green)" }} />
       </div>
       <div className="flow-bar__legend">
-        <span style={{ color: "var(--red)" }}>Iko {iko}</span>
-        <span style={{ color: "var(--yellow)" }}>Väg {pavag}</span>
+        <span style={{ color: "var(--red)" }}>I kö {iko}</span>
+        <span style={{ color: "var(--yellow)" }}>På väg {pavag}</span>
         <span style={{ color: "var(--green)" }}>Klart {klart}</span>
         <span className="flow-bar__total">Tot {total}</span>
       </div>
@@ -157,7 +157,7 @@ function FlowBar({ iko, pavag, klart, total }) {
 }
 
 function StatusPill({ total, iko, klart }) {
-  const label = klart === total && total > 0 ? "KLART" : iko > 0 ? "I KO" : "PÅ VÄG";
+  const label = klart === total && total > 0 ? "KLART" : iko > 0 ? "I KÖ" : "PÅ VÄG";
   const color = klart === total && total > 0 ? C.green : iko > 0 ? C.red : C.yellow;
   return (
     <span className="status-pill" style={{ color, background: color + "20", border: "1px solid " + color + "44" }}>{label}</span>
@@ -170,15 +170,29 @@ export default function Live() {
   const [drag, setDrag] = useState(false);
   const [staffing, setStaffing] = useState(null);
   const [staffErr, setStaffErr] = useState(null);
+  const [manualBemanning, setManualBemanning] = useState({});
 
   const handleFile = (f) => {
     setErr(null);
-    parseLive(f).then(setData).catch(e => setErr(e.message));
+    parseLive(f).then(d => { setData(d); setManualBemanning({}); }).catch(e => setErr(e.message));
   };
 
   const handleStaffingFile = (f) => {
     setStaffErr(null);
-    parseStaffingFile(f).then(setStaffing).catch(e => setStaffErr(e.message));
+    parseStaffingFile(f).then(rows => {
+      setStaffing(rows);
+      const nm = Object.fromEntries(rows.map(r => [normKbana(r.kbana), r]));
+      setManualBemanning(prev => {
+        const next = { ...prev };
+        if (data) {
+          for (const kb of data.kbanor) {
+            const s = nm[normKbana(kb.kbana)];
+            if (s) next[kb.kbana] = s.bemanning;
+          }
+        }
+        return next;
+      });
+    }).catch(e => setStaffErr(e.message));
   };
 
   const staffingMap = staffing
@@ -244,19 +258,27 @@ export default function Live() {
                   </div>
                   <StatusPill {...kb.pafyll} />
                 </div>
-                {(() => {
-                  const s = staffingMap?.[normKbana(kb.kbana)];
-                  if (!s) return null;
-                  return (
-                    <div className="kbana-card__staffing">
-                      {s.p1 > 0 && <span className="staffing-shift">P1</span>}
-                      {s.p2 > 0 && <span className="staffing-shift">P2</span>}
-                      {s.p3 > 0 && <span className="staffing-shift">P3</span>}
-                      {s.p8 > 0 && <span className="staffing-shift">P8</span>}
-                      <span className="staffing-total">{s.bemanning} pers</span>
-                    </div>
-                  );
-                })()}
+                <div className="kbana-card__staffing">
+                  {staffingMap?.[normKbana(kb.kbana)]?.p1 > 0 && <span className="staffing-shift">P1</span>}
+                  {staffingMap?.[normKbana(kb.kbana)]?.p2 > 0 && <span className="staffing-shift">P2</span>}
+                  {staffingMap?.[normKbana(kb.kbana)]?.p3 > 0 && <span className="staffing-shift">P3</span>}
+                  {staffingMap?.[normKbana(kb.kbana)]?.p8 > 0 && <span className="staffing-shift">P8</span>}
+                  <div className="staffing-manual">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      className="staffing-input"
+                      value={manualBemanning[kb.kbana] ?? ""}
+                      placeholder="–"
+                      onChange={e => setManualBemanning(prev => ({
+                        ...prev,
+                        [kb.kbana]: e.target.value === "" ? "" : +e.target.value,
+                      }))}
+                    />
+                    <span className="staffing-label">pers</span>
+                  </div>
+                </div>
                 <div className="kbana-card__body">
                   <div className="block-label">
                     {kb.isPL ? "PALLAR" : "PÅFYLLNINGAR"}
