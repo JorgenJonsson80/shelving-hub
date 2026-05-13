@@ -59,6 +59,10 @@ const CELL_MAP = {
   },
 };
 
+// Default bastid by line type: spår (Line*) = 1.8 min, golv (Stn*) = 2.8 min
+const defaultBastid = def =>
+  def.line.startsWith("Stn") ? 2.8 : 1.8;
+
 function readFlow(R, coords) {
   const g = ([r, c]) => +R[r]?.[c] || 0;
   return { iko: g(coords.iko), pavag: g(coords.pavag), klart: g(coords.klart), total: g(coords.total) };
@@ -93,18 +97,42 @@ function getWorkerStatus(sched, nowMins) {
   return { active, planned };
 }
 
-// Returns { faktiskt, kravs } in påfyllningar/h, or null fields if can't compute
-function getTempo(flow, sched, nowMins) {
-  if (!sched || !sched.length || !flow || !flow.total) return null;
+/**
+ * Formula: arbetsminuter = kolli × bastid + kartonger × 0.6 + pallar × 12
+ * Returns { remainWork, doneWork, availMins, buffer, efficiency }
+ * All in minutes (person-minutes for remain/done, minutes for avail/buffer).
+ */
+function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins) {
+  if (!pafyll || !sched || !sched.length || !pers || pers <= 0) return null;
   const bounds = getShiftBounds(sched);
   if (!bounds) return null;
-  const { startMins, endMins } = bounds;
-  const elapsedH  = Math.max(0, nowMins - startMins) / 60;
-  const remainH   = Math.max(0, endMins   - nowMins) / 60;
-  return {
-    faktiskt: elapsedH  > 0.05 ? flow.klart / elapsedH             : null,
-    kravs:    remainH   > 0.05 ? (flow.total - flow.klart) / remainH : null,
-  };
+  const elapsedH = Math.max(0, nowMins - bounds.startMins) / 60;
+  const remainH  = Math.max(0, bounds.endMins - nowMins) / 60;
+
+  const pafyllKvar  = pafyll.iko + pafyll.pavag;
+  const kartKvar    = kart ? kart.iko + kart.pavag : 0;
+  const pafyllKlart = pafyll.klart;
+  const kartKlart   = kart ? kart.klart : 0;
+
+  // person-minutes of work remaining and done
+  const remainWork = pafyllKvar * bastidMins + kartKvar * 0.6 + pallKvar * 12;
+  const doneWork   = pafyllKlart * bastidMins + kartKlart * 0.6 + pallKlart * 12;
+
+  // available person-minutes left in shift
+  const availMins = pers * remainH * 60;
+  const buffer    = availMins - remainWork;
+
+  // efficiency: done work vs time × persons spent
+  const spentMins = elapsedH * 60 * pers;
+  const efficiency = spentMins > 3 ? (doneWork / spentMins) * 100 : null;
+
+  return { remainWork, doneWork, availMins, buffer, efficiency, remainH, elapsedH };
+}
+
+function fmtMins(mins) {
+  const h = Math.floor(Math.abs(mins) / 60);
+  const m = Math.round(Math.abs(mins) % 60);
+  return h > 0 ? `${h}h ${m}min` : `${m}min`;
 }
 
 function parseStaffingFile(file) {
@@ -153,8 +181,7 @@ function parseLive(file) {
         const total = { pafyll: readFlow(R, CELL_MAP.total.pafyll), kart: readFlow(R, CELL_MAP.total.kart) };
         const allZero = kbanor.every(k => k.pafyll.total === 0 && !k.isPL);
         if (allZero) throw new Error("Alla värden är noll — fel fil eller flik? Kontrollera att det är Visualisering-filen (Infattning SDS).");
-        const active = kbanor.filter(k => k.pafyll.total > 0 || k.isPL);
-        resolve({ kbanor: active, pallarPerK, total, fileName: file.name, loaded: new Date().toLocaleTimeString("sv-SE") });
+        resolve({ kbanor: kbanor.filter(k => k.pafyll.total > 0 || k.isPL), pallarPerK, total, fileName: file.name, loaded: new Date().toLocaleTimeString("sv-SE") });
       } catch (err) { reject(err); }
     };
     reader.onerror = reject;
@@ -194,15 +221,13 @@ function StatusPill({ total, iko, klart }) {
 }
 
 function AheadBehindPill({ flow, sched, nowMins }) {
-  const tempo = getTempo(flow, sched, nowMins);
-  if (!tempo) return null;
-  // Compare flow progress % vs elapsed time %
+  if (!sched || !sched.length || !flow || !flow.total) return null;
   const bounds = getShiftBounds(sched);
   if (!bounds) return null;
   const totalShiftMins = bounds.endMins - bounds.startMins;
-  const elapsedMins = Math.max(0, nowMins - bounds.startMins);
-  const timeProg = totalShiftMins > 0 ? elapsedMins / totalShiftMins : 0;
-  const flowProg = flow.total > 0 ? flow.klart / flow.total : 0;
+  if (totalShiftMins <= 0) return null;
+  const timeProg = Math.min(1, Math.max(0, nowMins - bounds.startMins) / totalShiftMins);
+  const flowProg = flow.klart / flow.total;
   const delta = flowProg - timeProg;
   let label, color;
   if      (delta >  0.08) { label = `FÖRE +${Math.round(delta * 100)}%`; color = C.green;  }
@@ -215,28 +240,36 @@ function AheadBehindPill({ flow, sched, nowMins }) {
   );
 }
 
-function TempoRow({ flow, sched, nowMins }) {
-  const tempo = getTempo(flow, sched, nowMins);
-  if (!tempo || (tempo.faktiskt == null && tempo.kravs == null)) return null;
-  const { faktiskt, kravs } = tempo;
-  const color = faktiskt != null && kravs != null
-    ? (faktiskt >= kravs ? C.green : faktiskt >= kravs * 0.8 ? C.yellow : C.red)
-    : "var(--text-dim)";
+function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins }) {
+  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins);
+  if (!w) return null;
+
+  const onTrack = w.buffer >= 0;
+  const bufferColor = onTrack ? C.green : C.red;
+  const effColor = w.efficiency == null ? "var(--dim)"
+    : w.efficiency >= 90 ? C.green
+    : w.efficiency >= 70 ? C.yellow
+    : C.red;
+
   return (
-    <div className="tempo-row">
-      {faktiskt != null && (
-        <span className="tempo-val">
-          <span style={{ color, fontWeight: 800 }}>{faktiskt.toFixed(1)}</span>
-          <span className="tempo-unit"> pf/h</span>
-          <span className="tempo-lbl">faktiskt</span>
+    <div className="work-calc">
+      <div className="work-calc__item">
+        <span className="work-calc__lbl">Kvar</span>
+        <span className="work-calc__val">{fmtMins(w.remainWork)}</span>
+      </div>
+      <div className="work-calc__item">
+        <span className="work-calc__lbl">Buffert</span>
+        <span className="work-calc__val" style={{ color: bufferColor }}>
+          {onTrack ? "+" : "–"}{fmtMins(w.buffer)}
         </span>
-      )}
-      {kravs != null && (
-        <span className="tempo-val">
-          <span style={{ color: "var(--text)", fontWeight: 800 }}>{kravs.toFixed(1)}</span>
-          <span className="tempo-unit"> pf/h</span>
-          <span className="tempo-lbl">behövs</span>
-        </span>
+      </div>
+      {w.efficiency != null && (
+        <div className="work-calc__item">
+          <span className="work-calc__lbl">Effektivitet</span>
+          <span className="work-calc__val" style={{ color: effColor }}>
+            {Math.round(w.efficiency)}%
+          </span>
+        </div>
       )}
     </div>
   );
@@ -263,19 +296,19 @@ function ScheduleOverview({ kbanor, schedule, nowMins }) {
       <div className="schedule-overview__grid">
         {items.map(({ kbana, status, active, planned, minsUntil }) => {
           let color, label;
-          if      (status === "active")   { color = C.green;              label = `${active}/${planned} pers`; }
-          else if (status === "missing")  { color = C.red;                label = "SAKNAS"; }
+          if      (status === "active")   { color = C.green;           label = `${active}/${planned} pers`; }
+          else if (status === "missing")  { color = C.red;             label = "SAKNAS"; }
           else if (status === "upcoming") {
             color = C.yellow;
             const h = Math.floor(minsUntil / 60), m = minsUntil % 60;
             label = `om ${h > 0 ? h + "h " : ""}${m}min`;
           }
-          else if (status === "done")     { color = "var(--dim)";         label = "Avslutat"; }
-          else                            { color = "var(--border-2)";    label = "–"; }
+          else if (status === "done")     { color = "var(--dim)";      label = "Avslutat"; }
+          else                            { color = "var(--border-2)"; label = "–"; }
           return (
             <div key={kbana} className="schedule-chip" style={{ borderColor: color + "55" }}>
               <span className="schedule-chip__name" style={{ color: "var(--text-dim)" }}>{kbana}</span>
-              <span className="schedule-chip__val" style={{ color }}>{label}</span>
+              <span className="schedule-chip__val"  style={{ color }}>{label}</span>
             </div>
           );
         })}
@@ -303,12 +336,12 @@ export default function Live() {
   const [manualBemanning, setManualBemanning] = useState(() => ls("live_bemanning", {}));
   const [manualPall,      setManualPall]      = useState(() => ls("live_pall", {}));
   const [schedule,        setSchedule]        = useState(() => ls("live_schedule", {}));
+  const [bastidPerK,      setBastidPerK]      = useState(() => ls("live_bastid", {}));
   const [aiResult,        setAiResult]        = useState(null);
   const [aiLoading,       setAiLoading]       = useState(false);
   const [aiErr,           setAiErr]           = useState(null);
   const [now,             setNow]             = useState(() => new Date());
 
-  // Tick every 30 s so tempo/schedule refresh without page reload
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(id);
@@ -317,8 +350,13 @@ export default function Live() {
   useEffect(() => { localStorage.setItem("live_bemanning", JSON.stringify(manualBemanning)); }, [manualBemanning]);
   useEffect(() => { localStorage.setItem("live_pall",      JSON.stringify(manualPall));      }, [manualPall]);
   useEffect(() => { localStorage.setItem("live_schedule",  JSON.stringify(schedule));        }, [schedule]);
+  useEffect(() => { localStorage.setItem("live_bastid",    JSON.stringify(bastidPerK));      }, [bastidPerK]);
 
   const nowMins = now.getHours() * 60 + now.getMinutes();
+
+  const getBastid = (kb) => bastidPerK[kb.kbana] ?? defaultBastid(kb);
+  const toggleBastid = (kbana, current) =>
+    setBastidPerK(prev => ({ ...prev, [kbana]: current === 1.8 ? 2.8 : 1.8 }));
 
   const handleFile = (f) => {
     setErr(null);
@@ -348,8 +386,8 @@ export default function Live() {
   const setPallVal = (kbana, field, val) =>
     setManualPall(prev => ({ ...prev, [kbana]: { ...(prev[kbana] || {}), [field]: val === "" ? "" : +val } }));
 
-  const addWorker    = (kbana)           => setSchedule(prev => ({ ...prev, [kbana]: [...(prev[kbana] || []), { start: "", end: "" }] }));
-  const removeWorker = (kbana, idx)      => setSchedule(prev => ({ ...prev, [kbana]: (prev[kbana] || []).filter((_, i) => i !== idx) }));
+  const addWorker    = (kbana)            => setSchedule(prev => ({ ...prev, [kbana]: [...(prev[kbana] || []), { start: "", end: "" }] }));
+  const removeWorker = (kbana, idx)       => setSchedule(prev => ({ ...prev, [kbana]: (prev[kbana] || []).filter((_, i) => i !== idx) }));
   const updateWorker = (kbana, idx, f, v) => setSchedule(prev => {
     const list = [...(prev[kbana] || [])]; list[idx] = { ...list[idx], [f]: v }; return { ...prev, [kbana]: list };
   });
@@ -360,38 +398,40 @@ export default function Live() {
 
     const nowStr = now.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
     const activeKbanor = data.kbanor.filter(kb => !kb.isPL);
-    const allUnstaffed = activeKbanor.every(kb => !manualBemanning[kb.kbana] || +manualBemanning[kb.kbana] === 0);
+    const allUnstaffed  = activeKbanor.every(kb => !manualBemanning[kb.kbana] || +manualBemanning[kb.kbana] === 0);
     const allNoSchedule = activeKbanor.every(kb => !(schedule[kb.kbana] || []).length);
 
     const banorText = data.kbanor.map(kb => {
-      const sched  = schedule[kb.kbana] || [];
+      const sched    = schedule[kb.kbana] || [];
+      const pers     = +(manualBemanning[kb.kbana] || 0);
+      const bastid   = getBastid(kb);
       const { active, planned } = getWorkerStatus(sched, nowMins);
-      const tempo  = getTempo(kb.pafyll, sched, nowMins);
       const pallFile = data.pallarPerK[kb.kbana];
       const pallMan  = manualPall[kb.kbana];
-      const pallIko   = +(pallMan?.iko   ?? pallFile?.iko   ?? 0);
-      const pallPavag = +(pallMan?.pavag ?? pallFile?.pavag ?? 0);
-      const pallKlart = +(pallMan?.klart ?? pallFile?.klart ?? 0);
-      const pers = manualBemanning[kb.kbana] || 0;
+      const src      = (pallMan && Object.values(pallMan).some(v => +v > 0)) ? pallMan : pallFile;
+      const pallKvar  = src ? (+(src.iko||0) + +(src.pavag||0)) : 0;
+      const pallKlart = src ? +(src.klart||0) : 0;
+      const w = calcWork(kb.pafyll, kb.kart, pallKvar, pallKlart, pers, sched, nowMins, bastid);
+      const workStr = w
+        ? `Kvar ${fmtMins(w.remainWork)}, Buffert ${w.buffer >= 0 ? "+" : "–"}${fmtMins(w.buffer)}, Eff ${w.efficiency != null ? Math.round(w.efficiency) + "%" : "?"}`
+        : "Inget schema/bemanning";
       const flowPct = kb.pafyll.total > 0 ? ((kb.pafyll.klart / kb.pafyll.total) * 100).toFixed(0) + "%" : "?";
-      const tempoStr = tempo?.faktiskt != null
-        ? `Tempo: ${tempo.faktiskt.toFixed(1)} pf/h (behövs ${tempo.kravs?.toFixed(1) ?? "?"} pf/h)`
-        : "Inget schema";
-      const schedStr = planned > 0 ? `${active}/${planned} aktiva` : "Inget schema";
-      return `${kb.kbana}: Påfyll ${kb.pafyll.klart}/${kb.pafyll.total}(${flowPct}), Kart ${kb.kart?.klart ?? 0}/${kb.kart?.total ?? 0}, Pall ikö=${pallIko} klart=${pallKlart}, Pers=${pers}, Schema=${schedStr}, ${tempoStr}`;
+      return `${kb.kbana}: Påfyll ${kb.pafyll.klart}/${kb.pafyll.total}(${flowPct}), Kart ${kb.kart?.klart ?? 0}/${kb.kart?.total ?? 0}, Pall kvar=${pallKvar} klart=${pallKlart}, Pers=${pers}, Schema=${planned > 0 ? active + "/" + planned + " aktiva" : "saknas"}, Bastid=${bastid}min, ${workStr}`;
     }).join("\n");
 
     let warnings = "";
-    if (allUnstaffed) warnings += "\nVARNING: Ingen K-bana har bemanning registrerad — påminn användaren att fylla i personal!";
-    if (allNoSchedule) warnings += "\nVARNING: Inga arbetstider inlagda — tempo och framsteg kan inte beräknas.";
+    if (allUnstaffed)  warnings += "\nVARNING: Ingen K-bana har bemanning registrerad!";
+    if (allNoSchedule) warnings += "\nVARNING: Inga arbetstider inlagda — buffert kan inte beräknas.";
 
-    const prompt = `Du är operativ ledare på ett lager. Klockan är ${nowStr}. Analysera nuläget och ge KORTA, DIREKTA råd på svenska.
+    const prompt = `Du är operativ ledare på ett lager. Klockan är ${nowStr}.
+Formel: arbetsminuter = kolli × bastid + kartonger × 0,6 + pallar × 12. Bastid 1,8 min = spår, 2,8 min = golv.
+Positiv buffert = hinner klart. Negativ buffert = hinner inte.
+${warnings}
 
 K-bana status:
 ${banorText}
-${warnings}
 
-Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd och varför 3) Konkreta rekommendationer (max 3 punkter). Max 200 ord. Rakt och operativt.`;
+Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som är i riskzonen 3) Konkreta åtgärder. Max 200 ord.`;
 
     callAI([{ role: "user", content: prompt }], 600)
       .then(text => { setAiResult(text); setAiLoading(false); })
@@ -404,18 +444,15 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
         live
         eyebrow="Live - nuläge"
         title="Infattningsstatus"
-        subtitle={
-          data
-            ? `${now.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} — uppdateras var 30:e sekund`
-            : "Följ K-banor, påfyllningar, kartonger och pallar."
-        }
+        subtitle={data
+          ? `${now.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })} — uppdateras var 30:e sekund`
+          : "Följ K-banor, påfyllningar, kartonger och pallar."}
         actions={data && (
           <div className="file-meta">
             <div className="file-meta__name">{data.fileName}</div>
             <div className="file-meta__loaded">
               Laddad {data.loaded} ·{" "}
-              <label className="file-meta__change">
-                Byt fil
+              <label className="file-meta__change">Byt fil
                 <input type="file" accept=".xlsx" className="visually-hidden-input"
                   onChange={e => { if (e.target.files[0]) handleFile(e.target.files[0]); }} />
               </label>
@@ -430,7 +467,7 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
         )}
       />
 
-      {err     && <Alert>{err}</Alert>}
+      {err      && <Alert>{err}</Alert>}
       {staffErr && <Alert>{staffErr}</Alert>}
 
       {!data && (
@@ -441,7 +478,6 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
 
       {data && (
         <div className="anim-fade-up">
-          {/* Real-time schedule overview */}
           <ScheduleOverview kbanor={data.kbanor} schedule={schedule} nowMins={nowMins} />
 
           <div className="kbana-grid">
@@ -449,16 +485,23 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
               const pallFile = data.pallarPerK[kb.kbana];
               const pallMan  = manualPall[kb.kbana];
               const hasManualPall = pallMan && Object.values(pallMan).some(v => v !== "" && +v > 0);
-              const pallFlow = hasManualPall
-                ? { iko: +(pallMan.iko||0), pavag: +(pallMan.pavag||0), klart: +(pallMan.klart||0), total: +(pallMan.iko||0) + +(pallMan.pavag||0) + +(pallMan.klart||0) }
-                : pallFile && pallFile.total > 0 ? pallFile : null;
+              const src = hasManualPall ? pallMan : pallFile;
+              const pallFlow = src && (+(src.iko||0) + +(src.pavag||0) + +(src.klart||0)) > 0
+                ? { iko: +(src.iko||0), pavag: +(src.pavag||0), klart: +(src.klart||0), total: +(src.iko||0) + +(src.pavag||0) + +(src.klart||0) }
+                : null;
+              const pallKvar  = src ? +(src.iko||0) + +(src.pavag||0) : 0;
+              const pallKlart = src ? +(src.klart||0) : 0;
 
               const sched = schedule[kb.kbana] || [];
-              const { active: activeWorkers, planned: plannedWorkers } = getWorkerStatus(sched, nowMins);
-              const workerColor = !plannedWorkers ? "var(--dim)"
-                : activeWorkers === 0 ? C.red
-                : activeWorkers < plannedWorkers ? C.yellow
+              const { active: activeW, planned: plannedW } = getWorkerStatus(sched, nowMins);
+              const workerColor = !plannedW ? "var(--dim)"
+                : activeW === 0 ? C.red
+                : activeW < plannedW ? C.yellow
                 : C.green;
+
+              const pers    = +(manualBemanning[kb.kbana] || 0);
+              const bastid  = getBastid(kb);
+              const isGolv  = bastid === 2.8;
 
               return (
                 <Panel key={kb.kbana} className="kbana-card" flush>
@@ -479,10 +522,19 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
                     {staffingMap?.[normKbana(kb.kbana)]?.p2 > 0 && <span className="staffing-shift">P2</span>}
                     {staffingMap?.[normKbana(kb.kbana)]?.p3 > 0 && <span className="staffing-shift">P3</span>}
                     {staffingMap?.[normKbana(kb.kbana)]?.p8 > 0 && <span className="staffing-shift">P8</span>}
-                    {plannedWorkers > 0 && (
+                    {plannedW > 0 && (
                       <span className="staffing-shift" style={{ borderColor: workerColor + "44", background: workerColor + "15", color: workerColor }}>
-                        {activeWorkers}/{plannedWorkers} nu
+                        {activeW}/{plannedW} nu
                       </span>
+                    )}
+                    {!kb.isPL && (
+                      <button
+                        className={"bastid-toggle" + (isGolv ? " bastid-toggle--golv" : "")}
+                        onClick={() => toggleBastid(kb.kbana, bastid)}
+                        title={`Bastid: ${bastid} min/kolli — klicka för att byta`}
+                      >
+                        {isGolv ? "Golv 2,8" : "Spår 1,8"}
+                      </button>
                     )}
                     <div className="staffing-manual">
                       <input type="number" min="0" step="0.5" className="staffing-input"
@@ -512,7 +564,14 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
                   <div className="kbana-card__body">
                     <div className="block-label">{kb.isPL ? "PALLAR" : "PÅFYLLNINGAR"}</div>
                     <FlowBar {...kb.pafyll} />
-                    <TempoRow flow={kb.pafyll} sched={sched} nowMins={nowMins} />
+
+                    {!kb.isPL && (
+                      <WorkCalc
+                        pafyll={kb.pafyll} kart={kb.kart}
+                        pallKvar={pallKvar} pallKlart={pallKlart}
+                        pers={pers} sched={sched} nowMins={nowMins} bastidMins={bastid}
+                      />
+                    )}
 
                     {kb.kart && (
                       <div className="block-spacer">
@@ -556,14 +615,8 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som behöver åtgärd 
           {data.total && data.total.pafyll.total > 0 && (
             <Panel title="TOTALT" className="live-total">
               <div className="live-total__grid">
-                <div>
-                  <div className="block-label">PÅFYLLNINGAR</div>
-                  <FlowBar {...data.total.pafyll} />
-                </div>
-                <div>
-                  <div className="block-label">KARTONGER</div>
-                  <FlowBar {...data.total.kart} />
-                </div>
+                <div><div className="block-label">PÅFYLLNINGAR</div><FlowBar {...data.total.pafyll} /></div>
+                <div><div className="block-label">KARTONGER</div><FlowBar {...data.total.kart} /></div>
               </div>
             </Panel>
           )}
