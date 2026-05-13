@@ -55,7 +55,7 @@ function parseDailyFile(file) {
         const raw = XLSX.utils.sheet_to_json(sheet, { defval: "", header: 1 });
 
         let dateStr = "";
-        const nm = file.name.match(/(\d+)[_\s](jan|feb|mar|apr|maj|jun|jul|aug|sep|okt|nov|dec)/i);
+        const nm = file.name.match(/(\d+)[_\s]?(jan|feb|mar|apr|maj|jun|jul|aug|sep|okt|nov|dec)/i);
         if (nm) {
           const ms = { jan:1,feb:2,mar:3,apr:4,maj:5,jun:6,jul:7,aug:8,sep:9,okt:10,nov:11,dec:12 };
           const y = new Date().getFullYear();
