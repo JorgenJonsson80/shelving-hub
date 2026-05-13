@@ -322,6 +322,32 @@ function ScheduleOverview({ kbanor, schedule, nowMins }) {
   );
 }
 
+const DEFAULT_PASSES = {
+  P1: { start: "06:00", end: "14:00" },
+  P2: { start: "14:00", end: "22:00" },
+  P3: { start: "22:00", end: "06:00" },
+  P8: { start: "06:00", end: "14:00" },
+};
+
+function PassSettings({ passes, onChange }) {
+  return (
+    <Panel title="PASS-TIDER" className="pass-settings">
+      <div className="pass-settings__grid">
+        {Object.entries(passes).map(([name, { start, end }]) => (
+          <div key={name} className="pass-settings__row">
+            <span className="pass-settings__name">{name}</span>
+            <input type="time" className="time-input" value={start}
+              onChange={e => onChange(name, "start", e.target.value)} />
+            <span className="schedule-dash">–</span>
+            <input type="time" className="time-input" value={end}
+              onChange={e => onChange(name, "end", e.target.value)} />
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 function ls(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback; }
   catch { return fallback; }
@@ -337,6 +363,7 @@ export default function Live() {
   const [manualPall,      setManualPall]      = useState(() => ls("live_pall", {}));
   const [schedule,        setSchedule]        = useState(() => ls("live_schedule", {}));
   const [bastidPerK,      setBastidPerK]      = useState(() => ls("live_bastid", {}));
+  const [passes,          setPasses]          = useState(() => ls("live_passes", DEFAULT_PASSES));
   const [aiResult,        setAiResult]        = useState(null);
   const [aiLoading,       setAiLoading]       = useState(false);
   const [aiErr,           setAiErr]           = useState(null);
@@ -351,6 +378,7 @@ export default function Live() {
   useEffect(() => { localStorage.setItem("live_pall",      JSON.stringify(manualPall));      }, [manualPall]);
   useEffect(() => { localStorage.setItem("live_schedule",  JSON.stringify(schedule));        }, [schedule]);
   useEffect(() => { localStorage.setItem("live_bastid",    JSON.stringify(bastidPerK));      }, [bastidPerK]);
+  useEffect(() => { localStorage.setItem("live_passes",    JSON.stringify(passes));           }, [passes]);
 
   const nowMins = now.getHours() * 60 + now.getMinutes();
 
@@ -387,6 +415,17 @@ export default function Live() {
     setManualPall(prev => ({ ...prev, [kbana]: { ...(prev[kbana] || {}), [field]: val === "" ? "" : +val } }));
 
   const addWorker    = (kbana)            => setSchedule(prev => ({ ...prev, [kbana]: [...(prev[kbana] || []), { start: "", end: "" }] }));
+  const addPass = (kbana, passName) => {
+    const pass = passes[passName];
+    if (!pass?.start || !pass?.end) return;
+    setSchedule(prev => {
+      const cur = prev[kbana] || [];
+      if (cur.some(w => w.start === pass.start && w.end === pass.end)) return prev;
+      return { ...prev, [kbana]: [...cur, { start: pass.start, end: pass.end }] };
+    });
+  };
+  const updatePass = (name, field, val) =>
+    setPasses(prev => ({ ...prev, [name]: { ...prev[name], [field]: val } }));
   const removeWorker = (kbana, idx)       => setSchedule(prev => ({ ...prev, [kbana]: (prev[kbana] || []).filter((_, i) => i !== idx) }));
   const updateWorker = (kbana, idx, f, v) => setSchedule(prev => {
     const list = [...(prev[kbana] || [])]; list[idx] = { ...list[idx], [f]: v }; return { ...prev, [kbana]: list };
@@ -478,6 +517,7 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som är i riskzonen 3)
 
       {data && (
         <div className="anim-fade-up">
+          <PassSettings passes={passes} onChange={updatePass} />
           <ScheduleOverview kbanor={data.kbanor} schedule={schedule} nowMins={nowMins} />
 
           <div className="kbana-grid">
@@ -547,6 +587,21 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som är i riskzonen 3)
 
                   {/* Schedule / arbetstider */}
                   <div className="kbana-card__schedule">
+                    {/* Quick-add pass buttons */}
+                    <div className="pass-buttons">
+                      {Object.entries(passes).map(([name, pass]) => {
+                        if (!pass.start || !pass.end) return null;
+                        const added = sched.some(w => w.start === pass.start && w.end === pass.end);
+                        return (
+                          <button key={name}
+                            className={"pass-btn" + (added ? " pass-btn--active" : "")}
+                            onClick={() => addPass(kb.kbana, name)}
+                          >
+                            {name}
+                          </button>
+                        );
+                      })}
+                    </div>
                     {sched.map((w, i) => (
                       <div key={i} className="schedule-row">
                         <input type="time" className="time-input" value={w.start}
@@ -557,7 +612,7 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som är i riskzonen 3)
                         <button className="remove-worker-btn" onClick={() => removeWorker(kb.kbana, i)}>×</button>
                       </div>
                     ))}
-                    <button className="add-worker-btn" onClick={() => addWorker(kb.kbana)}>+ Arbetstid</button>
+                    <button className="add-worker-btn" onClick={() => addWorker(kb.kbana)}>+ Anpassad tid</button>
                   </div>
 
                   {/* Flow body */}

@@ -1502,6 +1502,59 @@ body {
   font: 700 11px var(--font-mono);
 }
 
+/* ── Pass-inställningar ──────────────────────────────────── */
+
+.pass-settings {
+  margin-bottom: 16px;
+}
+
+.pass-settings__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.pass-settings__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pass-settings__name {
+  color: var(--accent);
+  font: 800 11px var(--font-mono);
+  min-width: 24px;
+}
+
+.pass-buttons {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.pass-btn {
+  border: 1px solid var(--border-2);
+  border-radius: 5px;
+  background: none;
+  color: var(--dim);
+  padding: 3px 9px;
+  font: 700 10px var(--font-mono);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.pass-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.pass-btn--active {
+  border-color: rgba(66,185,120,0.4);
+  background: rgba(66,185,120,0.1);
+  color: var(--green);
+  cursor: default;
+}
+
 /* ── Bastid-toggle ───────────────────────────────────────── */
 
 .bastid-toggle {
