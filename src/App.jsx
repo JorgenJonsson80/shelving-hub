@@ -15,8 +15,6 @@ const TABS = [
 
 export default function App() {
   const [tab, setTab] = useState("live");
-  const { Component: ActiveTab } = TABS.find(t => t.id === tab);
-
   return (
     <div className="app-shell">
       <div className="topbar">
@@ -43,7 +41,11 @@ export default function App() {
       </div>
 
       <div className="app-main">
-        <ActiveTab />
+        {TABS.map(({ id, Component }) => (
+          <div key={id} style={tab === id ? undefined : { display: "none" }}>
+            <Component />
+          </div>
+        ))}
       </div>
     </div>
   );

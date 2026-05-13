@@ -1292,3 +1292,136 @@ body {
   color: var(--accent);
   font: 800 11px var(--font-mono);
 }
+
+/* ── K-bana head pills ───────────────────────────────────── */
+
+.kbana-card__pills {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.progress-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+/* ── Schedule / arbetstider ──────────────────────────────── */
+
+.kbana-card__schedule {
+  padding: 6px 16px 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.schedule-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.schedule-dash {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.time-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 3px 6px;
+  font: 700 11px var(--font-mono);
+  color-scheme: dark;
+}
+
+.time-input:focus {
+  outline: none;
+  border-color: var(--border-2);
+}
+
+.add-worker-btn {
+  border: 1px dashed var(--border-2);
+  border-radius: 6px;
+  background: none;
+  color: var(--dim);
+  padding: 3px 8px;
+  font: 700 10px var(--font-mono);
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.add-worker-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.remove-worker-btn {
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--dim);
+  padding: 2px 6px;
+  font: 800 14px var(--font-ui);
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.remove-worker-btn:hover {
+  color: var(--red);
+}
+
+/* ── Manual pall inputs ──────────────────────────────────── */
+
+.pall-manual__inputs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.pall-manual__field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+}
+
+.pall-manual__lbl {
+  font: 800 9px var(--font-mono);
+  letter-spacing: 0.5px;
+}
+
+.pall-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 3px 4px;
+  font: 700 11px var(--font-mono);
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.pall-input:focus {
+  outline: none;
+  border-color: var(--border-2);
+}
+
+.pall-input::-webkit-outer-spin-button,
+.pall-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
