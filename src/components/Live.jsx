@@ -191,13 +191,19 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som är i riskzonen 3)
             {data.kbanor.map(kb => {
               const pallFile = data.pallarPerK[kb.kbana];
               const pallMan  = manualPall[kb.kbana];
-              const hasManualPall = pallMan && Object.values(pallMan).some(v => v !== "" && +v > 0);
-              const src = hasManualPall ? pallMan : pallFile;
-              const pallFlow = src && (+(src.iko||0) + +(src.pavag||0) + +(src.klart||0)) > 0
-                ? { iko: +(src.iko||0), pavag: +(src.pavag||0), klart: +(src.klart||0), total: +(src.iko||0) + +(src.pavag||0) + +(src.klart||0) }
+              const getPall = field => {
+                const m = pallMan?.[field];
+                return (m !== undefined && m !== "") ? +m : +(pallFile?.[field] || 0);
+              };
+              const ikoVal   = getPall("iko");
+              const pavagVal = getPall("pavag");
+              const klartVal = getPall("klart");
+              const pallTotal = ikoVal + pavagVal + klartVal;
+              const pallFlow = pallTotal > 0
+                ? { iko: ikoVal, pavag: pavagVal, klart: klartVal, total: pallTotal }
                 : null;
-              const pallKvar  = src ? +(src.iko||0) + +(src.pavag||0) : 0;
-              const pallKlart = src ? +(src.klart||0) : 0;
+              const pallKvar  = ikoVal + pavagVal;
+              const pallKlart = klartVal;
 
               const sched = schedule[kb.kbana] || [];
               const { active: activeW, planned: plannedW } = getWorkerStatus(sched, nowMins);
