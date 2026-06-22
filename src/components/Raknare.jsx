@@ -229,13 +229,18 @@ export default function Raknare() {
 
   const userSummary = useMemo(() => {
     if (!userScan) return null;
-    const perUser = {}, perK = {};
+    const perUser = {}, perUserK = {}, perK = {};
     for (const r of userScan.rows) {
       perUser[r.user] = (perUser[r.user] || 0) + 1;
+      if (!perUserK[r.user]) perUserK[r.user] = {};
+      perUserK[r.user][r.kbana] = (perUserK[r.user][r.kbana] || 0) + 1;
       if (!perK[r.kbana]) perK[r.kbana] = {};
       perK[r.kbana][r.user] = (perK[r.kbana][r.user] || 0) + 1;
     }
-    const userList = Object.entries(perUser).map(([u, t]) => ({ u, t })).sort((a, b) => b.t - a.t);
+    const userList = Object.entries(perUser).map(([u, t]) => {
+      const topK = Object.entries(perUserK[u] || {}).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
+      return { u, t, sph: +(t / 8).toFixed(1), topK };
+    }).sort((a, b) => b.t - a.t);
     const kList = Object.entries(perK).map(([kbana, users]) => {
       const arr = Object.entries(users).map(([u, c]) => ({ u, c })).sort((a, b) => b.c - a.c);
       return { kbana, aktiva: arr.filter(x => x.c > threshold), drops: arr.filter(x => x.c <= threshold), tot: arr.reduce((s, x) => s + x.c, 0) };
@@ -270,9 +275,9 @@ export default function Raknare() {
 
   const userText = useMemo(() => {
     if (!userSummary) return "";
-    const lines = ["#\tAnvändare\tScans\tStatus"];
+    const lines = ["#\tAnvändare\tScans\tSnitt/h\tTopbana\tStatus"];
     userSummary.userList.forEach((u, i) => {
-      lines.push((i + 1) + "\t" + u.u + "\t" + u.t + "\t" + (u.t > threshold ? "Aktiv" : "Drop-in"));
+      lines.push((i + 1) + "\t" + u.u + "\t" + u.t + "\t" + u.sph + "\t" + u.topK + "\t" + (u.t > threshold ? "Aktiv" : "Drop-in"));
     });
     return lines.join("\n");
   }, [userSummary, threshold]);
@@ -362,6 +367,7 @@ export default function Raknare() {
                 "K-BANA",
                 { label: "ID ANV", align: "right" },
                 { label: "ID E1", align: "right" },
+                { label: "TOTALT", align: "right" },
                 { label: "% SCAN", align: "right" },
                 { label: "KART", align: "right" },
               ]}>
@@ -376,6 +382,7 @@ export default function Raknare() {
                         <td className="primary-cell">{k}</td>
                         <td className="is-right mono-cell">{c.idAnv}</td>
                         <td className="is-right mono-cell" style={{ color: C.textDim }}>{c.idE1}</td>
+                        <td className="is-right mono-cell" style={{ fontWeight: 700 }}>{tot}</td>
                         <td className="is-right mono-cell" style={{ color: pc, fontWeight: 700 }}>{pct}%</td>
                         <td className="is-right mono-cell">{c.kart}</td>
                       </tr>
@@ -460,13 +467,18 @@ export default function Raknare() {
                 )}
                 <div className="leaderboard__table">
                   <div className="leaderboard__row leaderboard__row--head">
-                    <span>#</span><span>ANVÄNDARE</span><span style={{ textAlign: "right" }}>SCANS</span>
+                    <span>#</span><span>ANVÄNDARE</span>
+                    <span style={{ textAlign: "right" }}>SCANS</span>
+                    <span style={{ textAlign: "right" }}>SNITT/H</span>
+                    <span style={{ textAlign: "right" }}>TOPBANA</span>
                   </div>
                   {userSummary?.userList.map((u, i) => (
                     <div key={u.u} className="leaderboard__row">
                       <span>{i + 1}</span>
                       <span className={u.t > threshold ? undefined : "is-muted"}>{u.u}</span>
                       <strong className={u.t > threshold ? "is-active" : undefined}>{u.t}</strong>
+                      <strong className={u.t > threshold ? "is-active" : undefined}>{u.sph}</strong>
+                      <strong style={{ color: "var(--dim)", textAlign: "right" }}>{u.topK}</strong>
                     </div>
                   ))}
                 </div>

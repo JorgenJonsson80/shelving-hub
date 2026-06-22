@@ -636,7 +636,7 @@
 
 .leaderboard__row {
   display: grid;
-  grid-template-columns: 28px 1fr 64px;
+  grid-template-columns: 28px 1fr 54px 54px 64px;
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
