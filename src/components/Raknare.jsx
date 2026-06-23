@@ -259,17 +259,17 @@ export default function Raknare() {
 
   const infText = useMemo(() => {
     if (!infattningSummary) return "";
-    const lines = ["K-bana\tID Anv\tID E1\t% Scan\tKartonger"];
+    const lines = ["K-bana\tID Anv\tID E1\tTotalt\t% Scan\tKartonger"];
     KBANA_LIST.forEach(k => {
       const c = infattningSummary.counts[k];
       if (!c) return;
       const tot = c.idAnv + c.idE1;
       const pct = tot > 0 ? Math.round(c.idAnv / tot * 100) : 0;
-      lines.push(k + "\t" + c.idAnv + "\t" + c.idE1 + "\t" + pct + "%\t" + c.kart);
+      lines.push(k + "\t" + c.idAnv + "\t" + c.idE1 + "\t" + tot + "\t" + pct + "%\t" + c.kart);
     });
     const totId = infattningSummary.tAnv + infattningSummary.tE1;
     const totPct = totId > 0 ? Math.round(infattningSummary.tAnv / totId * 100) : 0;
-    lines.push("Totalt\t" + infattningSummary.tAnv + "\t" + infattningSummary.tE1 + "\t" + totPct + "%\t" + infattningSummary.tKart);
+    lines.push("Totalt\t" + infattningSummary.tAnv + "\t" + infattningSummary.tE1 + "\t" + totId + "\t" + totPct + "%\t" + infattningSummary.tKart);
     return lines.join("\n");
   }, [infattningSummary]);
 
