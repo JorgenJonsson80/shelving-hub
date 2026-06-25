@@ -1,12 +1,34 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { C } from "../shared/theme";
 import { ActionButton, Alert, Dropzone, PageHeader, Panel } from "../shared/components";
-import { callAI } from "../shared/api";
-import { defaultBastid, normKbana, getWorkerStatus, calcWork, fmtMins } from "../shared/liveUtils";
+import { defaultBastid, normKbana, getWorkerStatus, calcLaneMetrics } from "../shared/liveUtils";
 import { parseLive, parseStaffingFile } from "../shared/parsers";
 import {
   FlowBar, StatusPill, AheadBehindPill, WorkCalc, ScheduleOverview, PassSettings,
 } from "./live/LiveSubComponents";
+
+const TROSKEL_TRIVIAL = 0.3;
+const TROSKEL_KRIS    = -0.3;
+const TROSKEL_LEDIG   =  0.5;
+
+function fmtH(h) {
+  if (h == null) return "–";
+  const sign = h < 0 ? "–" : "+";
+  return sign + Math.abs(h).toFixed(1) + "h";
+}
+function sigColor(sen) {
+  if (sen == null) return C.dim;
+  if (sen < -1)   return C.red;
+  if (sen < -0.3) return C.yellow;
+  if (sen >  0.5) return C.green;
+  return C.textDim;
+}
+function pColor(pr) {
+  if (pr == null) return C.dim;
+  if (pr < 0.8)  return C.yellow;
+  if (pr > 1.1)  return C.green;
+  return C.text;
+}
 
 const DEFAULT_PASSES = {
   P1: { start: "06:00", end: "14:00" },
@@ -31,9 +53,6 @@ export default function Live() {
   const [schedule,        setSchedule]        = useState(() => ls("live_schedule", {}));
   const [bastidPerK,      setBastidPerK]      = useState(() => ls("live_bastid", {}));
   const [passes,          setPasses]          = useState(() => ls("live_passes", DEFAULT_PASSES));
-  const [aiResult,        setAiResult]        = useState(null);
-  const [aiLoading,       setAiLoading]       = useState(false);
-  const [aiErr,           setAiErr]           = useState(null);
   const [now,             setNow]             = useState(() => new Date());
 
   useEffect(() => {
@@ -49,7 +68,100 @@ export default function Live() {
 
   const nowMins = now.getHours() * 60 + now.getMinutes();
 
-  const getBastid    = (kb) => bastidPerK[kb.kbana] ?? defaultBastid(kb);
+  const getBastid = (kb) => bastidPerK[kb.kbana] ?? defaultBastid(kb);
+
+  // ── EN beräkningsmodell ───────────────────────────────────────────────────
+  const analys = useMemo(() => {
+    if (!data) return null;
+    const banor = data.kbanor.filter(kb => !kb.isPL).map(kb => {
+      const bastid   = bastidPerK[kb.kbana] ?? defaultBastid(kb);
+      const sched    = schedule[kb.kbana] || [];
+      const pers     = +(manualBemanning[kb.kbana] || 0);
+      const pallFile = data.pallarPerK[kb.kbana];
+      const pallMan  = manualPall[kb.kbana];
+      const getPall  = f => { const m = pallMan?.[f]; return (m !== undefined && m !== "") ? +m : +(pallFile?.[f] || 0); };
+      const pallKvar  = getPall("iko") + getPall("pavag");
+      const pallKlart = getPall("klart");
+
+      const { sen, pr, tk, jobbKvar, bem } = calcLaneMetrics(
+        kb.pafyll, kb.kart, pallKvar, pallKlart, pers, sched, nowMins, bastid
+      );
+      if (sen === null) return { id: kb.kbana, sen: 0, pr, tk: 0, jobbKvar: 0, bem, kategori: "saknas" };
+
+      const isLowPr  = pr != null && pr < 0.8;
+      const isHighPr = pr != null && pr > 1.1;
+      let kategori;
+      if (sen < TROSKEL_KRIS) {
+        if (isHighPr)     kategori = "overbelastad";
+        else if (isLowPr) kategori = "struktur";
+        else              kategori = "underbemannad";
+      } else if (sen > TROSKEL_LEDIG) {
+        kategori = (isLowPr && bem >= 2) ? "overbemannad" : "klar";
+      } else {
+        kategori = "balans";
+      }
+      return { id: kb.kbana, sen, pr, tk: tk ?? 0, jobbKvar: jobbKvar ?? 0, bem, kategori };
+    });
+
+    const lediga = banor
+      .filter(b => (b.kategori === "klar" || b.kategori === "overbemannad") && b.sen >= TROSKEL_LEDIG && b.bem >= 2)
+      .sort((a, b) => b.sen - a.sen);
+    const kriser = banor
+      .filter(b => b.sen < TROSKEL_KRIS)
+      .sort((a, b) => a.sen - b.sen);
+
+    return { banor, lediga, kriser };
+  }, [data, manualBemanning, manualPall, schedule, nowMins, bastidPerK]);
+
+  // ── Åtgärdsplan från EN matchningsloop ───────────────────────────────────
+  const atgarder = useMemo(() => {
+    if (!analys) return [];
+    const out = [];
+    const ledigaKvar = analys.lediga.map(b => ({ ...b }));
+
+    analys.kriser.forEach(kris => {
+      if (kris.kategori === "struktur") {
+        out.push({
+          typ: "undersok", prioritet: Math.abs(kris.sen) * 5, lane: kris.id,
+          rubrik: `Undersök ${kris.id}`,
+          text: `${kris.jobbKvar.toFixed(1)}h kvar, prestation ${kris.pr != null ? (kris.pr * 100).toFixed(0) + "%" : "–"}. Lågt tempo trots underskott — kolla godsfördelning, utrustning eller kompetens.`,
+        });
+        return;
+      }
+      const givare = ledigaKvar.find(l => l.sen >= 1.0);
+      if (givare) {
+        out.push({
+          typ: "flytta", prioritet: Math.abs(kris.sen) * 10, lane: kris.id,
+          rubrik: `Flytta ${givare.id} → ${kris.id}`,
+          text: `${kris.id} saknar ${Math.abs(kris.sen).toFixed(1)}h (prest ${kris.pr != null ? (kris.pr * 100).toFixed(0) + "%" : "–"}). ${givare.id} har +${givare.sen.toFixed(1)}h över.`,
+        });
+        givare.sen -= Math.min(Math.abs(kris.sen), givare.sen);
+        if (givare.sen < TROSKEL_LEDIG) {
+          const i = ledigaKvar.indexOf(givare);
+          if (i >= 0) ledigaKvar.splice(i, 1);
+        }
+      } else {
+        out.push({
+          typ: "olost", prioritet: Math.abs(kris.sen) * 9, lane: kris.id,
+          rubrik: `${kris.id} saknar resurser`,
+          text: `${kris.id} ligger back ${Math.abs(kris.sen).toFixed(1)}h och det finns ingen ledig bana att låna från.`,
+          olostTimmar: Math.abs(kris.sen),
+        });
+      }
+    });
+    return out;
+  }, [analys]);
+
+  // ── Övertidsbeslut: EN gång, baserat på olösta ───────────────────────────
+  const overtid = useMemo(() => {
+    const olosta = atgarder.filter(a => a.typ === "olost");
+    if (!olosta.length) return null;
+    const timmar = olosta.reduce((s, a) => s + a.olostTimmar, 0);
+    return {
+      banor: olosta.map(a => a.lane), timmar,
+      text: `Inga lediga resurser kvar — ${olosta.length} ${olosta.length === 1 ? "bana" : "banor"} ligger back (${olosta.map(a => a.lane).join(", ")}). Underskott ${timmar.toFixed(1)}h. Överväg övertid eller extra personal (~${timmar.toFixed(1)} persontimmar).`,
+    };
+  }, [atgarder]);
   const toggleBastid = (kbana, current) =>
     setBastidPerK(prev => ({ ...prev, [kbana]: current === 1.8 ? 2.8 : 1.8 }));
 
@@ -98,51 +210,17 @@ export default function Live() {
     const list = [...(prev[kbana] || [])]; list[idx] = { ...list[idx], [f]: v }; return { ...prev, [kbana]: list };
   });
 
-  const analyzeNow = () => {
-    if (!data) return;
-    setAiLoading(true); setAiResult(null); setAiErr(null);
+  // ── Härledda vyer ─────────────────────────────────────────────────────────
+  const riskzon = analys?.banor
+    .filter(b => b.sen < -TROSKEL_TRIVIAL)
+    .sort((a, b) => a.sen - b.sen) ?? [];
 
-    const nowStr = now.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
-    const activeKbanor  = data.kbanor.filter(kb => !kb.isPL);
-    const allUnstaffed  = activeKbanor.every(kb => !manualBemanning[kb.kbana] || +manualBemanning[kb.kbana] === 0);
-    const allNoSchedule = activeKbanor.every(kb => !(schedule[kb.kbana] || []).length);
+  const synligaAtgarder = atgarder
+    .filter(a => a.typ !== "olost")
+    .sort((a, b) => b.prioritet - a.prioritet)
+    .slice(0, 5);
 
-    const banorText = data.kbanor.map(kb => {
-      const sched    = schedule[kb.kbana] || [];
-      const pers     = +(manualBemanning[kb.kbana] || 0);
-      const bastid   = getBastid(kb);
-      const { active, planned } = getWorkerStatus(sched, nowMins);
-      const pallFile = data.pallarPerK[kb.kbana];
-      const pallMan  = manualPall[kb.kbana];
-      const src      = (pallMan && Object.values(pallMan).some(v => +v > 0)) ? pallMan : pallFile;
-      const pallKvar  = src ? (+(src.iko||0) + +(src.pavag||0)) : 0;
-      const pallKlart = src ? +(src.klart||0) : 0;
-      const w = calcWork(kb.pafyll, kb.kart, pallKvar, pallKlart, pers, sched, nowMins, bastid);
-      const workStr = w
-        ? `Kvar ${fmtMins(w.remainWork)}, Buffert ${w.buffer >= 0 ? "+" : "–"}${fmtMins(w.buffer)}, Eff ${w.efficiency != null ? Math.round(w.efficiency) + "%" : "?"}`
-        : "Inget schema/bemanning";
-      const flowPct = kb.pafyll.total > 0 ? ((kb.pafyll.klart / kb.pafyll.total) * 100).toFixed(0) + "%" : "?";
-      return `${kb.kbana}: Påfyll ${kb.pafyll.klart}/${kb.pafyll.total}(${flowPct}), Kart ${kb.kart?.klart ?? 0}/${kb.kart?.total ?? 0}, Pall kvar=${pallKvar} klart=${pallKlart}, Pers=${pers}, Schema=${planned > 0 ? active + "/" + planned + " aktiva" : "saknas"}, Bastid=${bastid}min, ${workStr}`;
-    }).join("\n");
-
-    let warnings = "";
-    if (allUnstaffed)  warnings += "\nVARNING: Ingen K-bana har bemanning registrerad!";
-    if (allNoSchedule) warnings += "\nVARNING: Inga arbetstider inlagda — buffert kan inte beräknas.";
-
-    const prompt = `Du är operativ ledare på ett lager. Klockan är ${nowStr}.
-Formel: arbetsminuter = kolli × bastid + kartonger × 0,6 + pallar × 12. Bastid 1,8 min = spår, 2,8 min = golv.
-Positiv buffert = hinner klart. Negativ buffert = hinner inte.
-${warnings}
-
-K-bana status:
-${banorText}
-
-Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som är i riskzonen 3) Konkreta åtgärder. Max 200 ord.`;
-
-    callAI([{ role: "user", content: prompt }], 600)
-      .then(text => { setAiResult(text); setAiLoading(false); })
-      .catch(e => { setAiErr("API-fel: " + e.message); setAiLoading(false); });
-  };
+  const dolda = atgarder.filter(a => a.typ !== "olost").length - synligaAtgarder.length;
 
   return (
     <div className="dashboard-page">
@@ -186,6 +264,73 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som är i riskzonen 3)
         <div className="anim-fade-up">
           <PassSettings passes={passes} onChange={updatePass} />
           <ScheduleOverview kbanor={data.kbanor} schedule={schedule} nowMins={nowMins} />
+
+          {/* ── Utsago-sektion v2 ── */}
+          {(overtid || riskzon.length > 0 || synligaAtgarder.length > 0) && (
+            <div style={{ marginBottom: 8 }}>
+              {overtid && (
+                <div className="alert-panel" style={{ marginBottom: 8 }}>
+                  <div className="alert-panel__head">
+                    <span>⏰ KAPACITETSGLAPP — ÖVERTID?</span>
+                  </div>
+                  <div style={{ padding: "10px 14px", fontSize: 13, color: C.text, lineHeight: 1.6 }}>
+                    {overtid.text}
+                  </div>
+                </div>
+              )}
+
+              {riskzon.length > 0 && (
+                <div className="section-card" style={{ marginBottom: 8 }}>
+                  <div className="section-card__header section-card__header--accent">RISKZON</div>
+                  <div className="section-card__body section-card__body--flush">
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ color: C.dim, borderBottom: `1px solid ${C.border}` }}>
+                          <th style={{ padding: "6px 12px", textAlign: "left",  fontWeight: 600, fontSize: 11 }}>BANA</th>
+                          <th style={{ padding: "6px 12px", textAlign: "right", fontWeight: 600, fontSize: 11 }}>BUFFERT</th>
+                          <th style={{ padding: "6px 12px", textAlign: "right", fontWeight: 600, fontSize: 11 }}>JOBB KVAR</th>
+                          <th style={{ padding: "6px 12px", textAlign: "right", fontWeight: 600, fontSize: 11 }}>TID</th>
+                          <th style={{ padding: "6px 12px", textAlign: "right", fontWeight: 600, fontSize: 11 }}>PREST</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {riskzon.map(b => (
+                          <tr key={b.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                            <td style={{ padding: "7px 12px", color: C.text, fontWeight: 700 }}>{b.id}</td>
+                            <td style={{ padding: "7px 12px", textAlign: "right", color: sigColor(b.sen), fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtH(b.sen)}</td>
+                            <td style={{ padding: "7px 12px", textAlign: "right", color: C.textDim, fontVariantNumeric: "tabular-nums" }}>{b.jobbKvar.toFixed(1)}h</td>
+                            <td style={{ padding: "7px 12px", textAlign: "right", color: C.textDim, fontVariantNumeric: "tabular-nums" }}>{b.tk.toFixed(1)}h</td>
+                            <td style={{ padding: "7px 12px", textAlign: "right", color: pColor(b.pr), fontVariantNumeric: "tabular-nums" }}>{b.pr != null ? (b.pr * 100).toFixed(0) + "%" : "–"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {synligaAtgarder.length > 0 && (
+                <div className="section-card" style={{ marginBottom: 8 }}>
+                  <div className="section-card__header section-card__header--accent">ÅTGÄRDER</div>
+                  <div className="section-card__body">
+                    {synligaAtgarder.map((a, i) => (
+                      <div key={i} style={{ padding: "10px 0", borderBottom: i < synligaAtgarder.length - 1 ? `1px solid ${C.border}` : "none" }}>
+                        <div style={{ fontWeight: 700, color: a.typ === "flytta" ? C.yellow : C.blue, marginBottom: 3, fontSize: 13 }}>
+                          {a.rubrik}
+                        </div>
+                        <div style={{ fontSize: 12, color: C.textDim, lineHeight: 1.55 }}>{a.text}</div>
+                      </div>
+                    ))}
+                    {dolda > 0 && (
+                      <div style={{ marginTop: 8, fontSize: 11, color: C.dim, textAlign: "center" }}>
+                        + {dolda} fler åtgärder
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="kbana-grid">
             {data.kbanor.map(kb => {
@@ -348,21 +493,7 @@ Ge: 1) Snabb lägesbild (max 2 meningar) 2) Vilka K-banor som är i riskzonen 3)
             </Panel>
           )}
 
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <ActionButton onClick={analyzeNow} disabled={aiLoading} style={{ flex: 1 }}>
-              {aiLoading ? "Analyserar..." : "Analysera nuläge med AI"}
-            </ActionButton>
-            <ActionButton onClick={() => setData(null)}>Ladda ny fil</ActionButton>
-          </div>
-
-          {aiErr    && <Alert>{aiErr}</Alert>}
-          {aiResult && (
-            <Panel title="AI-ANALYS" className="ai-panel">
-              <div style={{ whiteSpace: "pre-wrap", color: "var(--text)", fontSize: 13, lineHeight: 1.65 }}>
-                {aiResult}
-              </div>
-            </Panel>
-          )}
+          <ActionButton onClick={() => setData(null)}>Ladda ny fil</ActionButton>
         </div>
       )}
     </div>

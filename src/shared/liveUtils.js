@@ -64,3 +64,15 @@ export function fmtMins(mins) {
   const m = Math.round(Math.abs(mins) % 60);
   return h > 0 ? `${h}h ${m}min` : `${m}min`;
 }
+
+export function calcLaneMetrics(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins) {
+  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins);
+  const { active } = getWorkerStatus(sched, nowMins);
+  return {
+    sen:      w ? w.buffer / 60 : null,
+    pr:       w?.efficiency != null ? w.efficiency / 100 : null,
+    tk:       w ? w.remainH : null,
+    jobbKvar: w ? w.remainWork / 60 : null,
+    bem:      active,
+  };
+}
