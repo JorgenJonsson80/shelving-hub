@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { C } from "../shared/theme";
 import { ActionButton, Alert, Dropzone, PageHeader, Panel } from "../shared/components";
 import { defaultBastid, normKbana, getWorkerStatus, calcLaneMetrics } from "../shared/liveUtils";
@@ -28,6 +28,102 @@ function pColor(pr) {
   if (pr < 0.8)  return C.yellow;
   if (pr > 1.1)  return C.green;
   return C.text;
+}
+
+function byggRapport(analys, atgarder, overtid, saldo, nowMins) {
+  const h = String(Math.floor(nowMins / 60)).padStart(2, "0");
+  const m = String(nowMins % 60).padStart(2, "0");
+  const tid   = `${h}:${m}`;
+  const datum = new Date().toLocaleDateString("sv-SE");
+
+  const L = [];
+  L.push(`SHELVING — LÄGESRAPPORT ${datum} kl ${tid}`);
+  L.push("═".repeat(40), "");
+  L.push("KLARAR VI PASSET?");
+  L.push(`  Jobb kvar (kö + ej shelvat):  ${saldo.jobbKvarH.toFixed(1)}h`);
+  L.push(`  Tid kvar i passet:            ${saldo.tidKvar.toFixed(1)}h`);
+  const s = saldo.saldo;
+  L.push(`  Saldo:                        ${s >= 0 ? "+" : ""}${s.toFixed(1)}h`);
+  L.push("");
+  if (s < -2)      L.push("⚠ UNDERSKOTT — överväg övertid eller extra personal");
+  else if (s < 0)  L.push("Något efter — pusha lite extra");
+  else             L.push("✓ Klarar passet med marginal");
+  L.push("");
+
+  L.push(`KRITISKA BANOR (${analys.kriser.length})`);
+  if (!analys.kriser.length) {
+    L.push("  Inga banor i kris.");
+  } else {
+    analys.kriser.slice(0, 5).forEach(b => {
+      const orsak = b.kategori === "overbelastad" ? "kör hårt, volym för stor"
+                  : b.kategori === "struktur"     ? "lågt tempo — undersök, ej bemanning"
+                  : "underbemannad — flytta folk hit";
+      L.push(`  ${b.id.padEnd(8)} ${b.sen.toFixed(1)}h   prest ${b.pr != null ? (b.pr * 100).toFixed(0) + "%" : "–"}   (${orsak})`);
+    });
+  }
+  L.push("");
+
+  L.push("ÅTGÄRDER");
+  const synliga = atgarder.filter(a => a.typ !== "olost").sort((a, b) => b.prioritet - a.prioritet).slice(0, 5);
+  if (!synliga.length) L.push("  Inga åtgärder behövs just nu.");
+  else synliga.forEach(a => L.push(`  • ${a.text}`));
+  if (overtid) L.push(`  • ${overtid.text}`);
+  L.push("");
+
+  L.push("LEDIGA BANOR (kan avvara)");
+  if (!analys.lediga.length) L.push("  Inga banor med överskott just nu.");
+  else L.push("  " + analys.lediga.map(b => `${b.id} +${b.sen.toFixed(1)}h`).join("   ·   "));
+  L.push("");
+  L.push("─".repeat(40));
+  L.push(`Genererad från Shelving Hub · ${new Date().toLocaleString("sv-SE")}`);
+  return L.join("\n");
+}
+
+function DagsrapportKnapp({ analys, atgarder, overtid, saldo, nowMins }) {
+  const [kopierad, setKopierad] = useState(false);
+  const rapport = useMemo(() => {
+    if (!analys || !saldo) return "";
+    return byggRapport(analys, atgarder, overtid, saldo, nowMins);
+  }, [analys, atgarder, overtid, saldo, nowMins]);
+
+  const kopiera = useCallback(() => {
+    if (!rapport) return;
+    const fallback = () => {};
+    try {
+      navigator.clipboard.writeText(rapport).then(
+        () => { setKopierad(true); setTimeout(() => setKopierad(false), 2500); },
+        fallback
+      );
+    } catch { fallback(); }
+  }, [rapport]);
+
+  if (!analys || !saldo) return null;
+
+  return (
+    <div className="section-card" style={{ marginBottom: 8 }}>
+      <div className="section-card__header">DAGSRAPPORT</div>
+      <div className="section-card__body">
+        <button
+          className="action-button action-button--secondary"
+          onClick={kopiera}
+          style={{ marginBottom: 8, fontSize: 13 }}
+        >
+          {kopierad ? "✓ Kopierad!" : "📋 Kopiera dagsrapport"}
+        </button>
+        <textarea
+          readOnly
+          value={rapport}
+          style={{
+            display: "block", width: "100%", minHeight: 220,
+            fontFamily: "var(--font-mono)", fontSize: 11,
+            background: "var(--surface)", color: "var(--text-dim)",
+            border: "1px solid var(--border)", borderRadius: 6,
+            padding: 10, resize: "vertical", lineHeight: 1.6,
+          }}
+        />
+      </div>
+    </div>
+  );
 }
 
 const DEFAULT_PASSES = {
@@ -162,6 +258,20 @@ export default function Live() {
       text: `Inga lediga resurser kvar — ${olosta.length} ${olosta.length === 1 ? "bana" : "banor"} ligger back (${olosta.map(a => a.lane).join(", ")}). Underskott ${timmar.toFixed(1)}h. Överväg övertid eller extra personal (~${timmar.toFixed(1)} persontimmar).`,
     };
   }, [atgarder]);
+  // ── Saldo-block ("Klarar vi passet?") ────────────────────────────────────
+  const saldoBlock = useMemo(() => {
+    if (!analys) return null;
+    const jobbKvarH = analys.banor.reduce((s, b) => s + b.jobbKvar, 0);
+    const tidKvar   = analys.banor.reduce((s, b) => s + b.tk,       0);
+    const saldo = tidKvar - jobbKvarH;
+    let saldoText, saldoColor;
+    if (saldo < -2)     { saldoText = `Ni saknar ${Math.abs(saldo).toFixed(1)}h — överväg övertid eller extra personal`; saldoColor = C.red; }
+    else if (saldo < 0) { saldoText = `Saknar ${Math.abs(saldo).toFixed(1)}h — pusha lite extra`;                         saldoColor = C.yellow; }
+    else if (saldo <= 2){ saldoText = `Hinner klart med ${saldo.toFixed(1)}h marginal`;                                   saldoColor = C.green; }
+    else                { saldoText = `${saldo.toFixed(1)}h tillgodo — bra läge`;                                         saldoColor = C.green; }
+    return { jobbKvarH, tidKvar, saldo, saldoText, saldoColor };
+  }, [analys]);
+
   const toggleBastid = (kbana, current) =>
     setBastidPerK(prev => ({ ...prev, [kbana]: current === 1.8 ? 2.8 : 1.8 }));
 
@@ -265,6 +375,36 @@ export default function Live() {
           <PassSettings passes={passes} onChange={updatePass} />
           <ScheduleOverview kbanor={data.kbanor} schedule={schedule} nowMins={nowMins} />
 
+          {/* ── Saldo-block: Klarar vi passet? ── */}
+          {saldoBlock && (
+            <div className="section-card" style={{ marginBottom: 8, border: `1px solid ${saldoBlock.saldo < -2 ? C.red + "66" : saldoBlock.saldo < 0 ? C.yellow + "66" : C.green + "44"}` }}>
+              <div className="section-card__header section-card__header--accent">KLARAR VI PASSET?</div>
+              <div className="section-card__body">
+                <div style={{ display: "flex", gap: 0, marginBottom: 10 }}>
+                  <div style={{ flex: 1, padding: "10px 14px", borderRight: `1px solid ${C.border}` }}>
+                    <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", marginBottom: 4 }}>KÖ + EJ SHELVAT</div>
+                    <div style={{ fontSize: 32, fontWeight: 800, color: C.text, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
+                      {saldoBlock.jobbKvarH.toFixed(1)}h
+                    </div>
+                  </div>
+                  <div style={{ flex: 1, padding: "10px 14px" }}>
+                    <div style={{ fontSize: 10, color: C.dim, letterSpacing: "0.08em", marginBottom: 4 }}>TID KVAR I PASSET</div>
+                    <div style={{ fontSize: 32, fontWeight: 800, color: C.text, fontVariantNumeric: "tabular-nums", lineHeight: 1 }}>
+                      {saldoBlock.tidKvar.toFixed(1)}h
+                    </div>
+                  </div>
+                </div>
+                <div style={{ padding: "10px 14px", borderTop: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 11, color: C.dim }}>SALDO</span>
+                  <span style={{ fontSize: 20, fontWeight: 800, color: saldoBlock.saldoColor, fontVariantNumeric: "tabular-nums" }}>
+                    {saldoBlock.saldo >= 0 ? "+" : ""}{saldoBlock.saldo.toFixed(1)}h
+                  </span>
+                  <span style={{ fontSize: 12, color: saldoBlock.saldoColor }}>{saldoBlock.saldoText}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── Utsago-sektion v2 ── */}
           {(overtid || riskzon.length > 0 || synligaAtgarder.length > 0) && (
             <div style={{ marginBottom: 8 }}>
@@ -331,6 +471,9 @@ export default function Live() {
               )}
             </div>
           )}
+
+          {/* ── Dagsrapport-knapp ── */}
+          {saldoBlock && <DagsrapportKnapp analys={analys} atgarder={atgarder} overtid={overtid} saldo={saldoBlock} nowMins={nowMins} />}
 
           <div className="kbana-grid">
             {data.kbanor.map(kb => {

@@ -4,13 +4,19 @@ import Bemanning from "./components/Bemanning";
 import Brief from "./components/Brief";
 import Raknare from "./components/Raknare";
 import Historik from "./components/Historik";
+import Prognos from "./components/Prognos";
+import Pafyllningsmonster from "./components/Pafyllningsmonster";
+import Ledtid from "./components/Ledtid";
 
 const TABS = [
-  { id: "live",      label: "Live",        Component: Live,     dot: true },
-  { id: "bemanning", label: "Bemanning",   Component: Bemanning },
-  { id: "brief",     label: "Daily Brief", Component: Brief },
-  { id: "rakna",     label: "Räknare",     Component: Raknare },
-  { id: "historik",  label: "Historik",    Component: Historik },
+  { id: "live",       label: "Live",            Component: Live,             dot: true },
+  { id: "bemanning",  label: "Bemanning",        Component: Bemanning },
+  { id: "brief",      label: "Daily Brief",      Component: Brief },
+  { id: "prognos",    label: "Prognos",          Component: Prognos },
+  { id: "monster",    label: "Påfyllningsmönster", Component: Pafyllningsmonster },
+  { id: "ledtid",     label: "Ledtid",           Component: Ledtid },
+  { id: "rakna",      label: "Räknare",          Component: Raknare },
+  { id: "historik",   label: "Historik",         Component: Historik },
 ];
 
 export default function App() {

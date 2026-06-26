@@ -1,5 +1,17 @@
 export const defaultBastid = def => def.line.startsWith("Stn") ? 2.8 : 1.8;
 
+// K61-36 before K61-7 so longer prefix matches first
+const KBANA_LOC_PREFIXES = ["K61-36", "K61-7", "K51", "K52", "K53", "K55", "K56", "K58", "K59", "K60", "K62"];
+
+export function classifyLocation(loc) {
+  if (!loc) return null;
+  const s = String(loc).trim().toUpperCase();
+  for (const kb of KBANA_LOC_PREFIXES) {
+    if (s.startsWith(kb)) return kb;
+  }
+  return null;
+}
+
 export function readFlow(R, coords) {
   const g = ([r, c]) => +R[r]?.[c] || 0;
   return { iko: g(coords.iko), pavag: g(coords.pavag), klart: g(coords.klart), total: g(coords.total) };
