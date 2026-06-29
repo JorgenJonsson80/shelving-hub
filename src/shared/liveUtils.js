@@ -1,13 +1,57 @@
 export const defaultBastid = def => def.line.startsWith("Stn") ? 2.8 : 1.8;
 
-// K61-36 before K61-7 so longer prefix matches first
-const KBANA_LOC_PREFIXES = ["K61-36", "K61-7", "K51", "K52", "K53", "K55", "K56", "K58", "K59", "K60", "K62"];
-
 export function classifyLocation(loc) {
   if (!loc) return null;
   const s = String(loc).trim().toUpperCase();
-  for (const kb of KBANA_LOC_PREFIXES) {
+
+  // K-prefix format (legacy)
+  for (const kb of ["K61-36", "K61-7", "K51", "K52", "K53", "K55", "K56", "K58", "K59", "K60", "K62"]) {
     if (s.startsWith(kb)) return kb;
+  }
+
+  // P-prefix format
+  if (s.startsWith("PD")) return "K62";
+  if (!/^P\d/.test(s)) return null;
+  const stn = parseInt(s.substring(3, 5), 10);
+  if (isNaN(stn)) return null;
+  const afterDash = s.split("-")[1] || "";
+  const lplMatch = afterDash.match(/^(\d+)/);
+  const lpl = lplMatch ? parseInt(lplMatch[1], 10) : null;
+  const lastDigit = lpl !== null ? lpl % 10 : null;
+  const isEven = lastDigit !== null && lastDigit % 2 === 0;
+  const isOdd  = lastDigit !== null && lastDigit % 2 === 1;
+  const t7 = s[6], t8 = s[7], t10 = s[9], t11 = s[10];
+  const t1011 = (t10 || "") + (t11 || "");
+  // P3 → allt till K55 tills vidare (K55/K61-36-split utkommenterad nedan)
+  if (s.startsWith("P3")) return "K55";
+  // if (s.startsWith("P3")) {
+  //   const t7d = /[0-9]/.test(t7 || "");
+  //   const n = parseInt(t1011, 10);
+  //   if (t7d || t8 === "A" || (t8 === "B" && !isNaN(n) && n >= 1 && n <= 13)) return "K55";
+  // }
+  // if (stn === 36) return "K61-36";
+  if (s.startsWith("P101")) {
+    if (isEven) return "K51";
+    if (isOdd && stn >= 10 && stn <= 14) return "K52";
+    if (isOdd && stn >= 15 && stn <= 18) return "K53";
+  }
+  if (s.startsWith("P102")) {
+    if (isEven) return "K56";
+    if (isOdd && stn >= 20 && stn <= 23) return "K53";
+    if (isOdd && stn >= 24 && stn <= 27) return "K52";
+  }
+  if (s.startsWith("P4")) { if (isEven) return "K58"; if (isOdd) return "K56"; }
+  if (s.startsWith("P6")) {
+    if (isEven) return "K58";
+    if (isOdd && stn >= 60 && stn <= 67) {
+      if (lpl !== null) { if (lpl <= 43) return "K60"; if (lpl >= 45) return "K59"; }
+    }
+  }
+  if (s.startsWith("P7")) {
+    if (isEven) return "K61-7";
+    if (isOdd && stn >= 71 && stn <= 77) {
+      if (lpl !== null) { if (lpl <= 81) return "K59"; if (lpl >= 83) return "K60"; }
+    }
   }
   return null;
 }
