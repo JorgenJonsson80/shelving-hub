@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef } from "react";
+import * as XLSX from "xlsx";
 import { C } from "../shared/theme";
 import { Alert, Panel, ActionButton } from "../shared/components";
 
@@ -144,25 +145,46 @@ export default function Ledtid() {
     URL.revokeObjectURL(url);
   };
 
+  const mergeImported = (imported) => {
+    if (!Array.isArray(imported)) throw new Error("Datan är inte en array.");
+    const dupeKey = o => `${o.kbana}|${o.skickad}|${o.klar}|${o.datum}`;
+    const existing = new Set(obs.map(dupeKey));
+    const nya = imported.filter(o => !existing.has(dupeKey(o)));
+    save([...obs, ...nya]);
+    setImportMsg(`${nya.length} nya observationer importerade (${imported.length - nya.length} dubbletter hoppades över).`);
+  };
+
   const handleImport = (e) => {
     setImportErr(null);
     setImportMsg(null);
     const f = e.target.files[0];
     if (!f) return;
     const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const imported = JSON.parse(ev.target.result);
-        if (!Array.isArray(imported)) throw new Error("Filen är inte en array.");
-        // Merge — skip duplicates on kbana|skickad|klar|datum
-        const dupeKey = o => `${o.kbana}|${o.skickad}|${o.klar}|${o.datum}`;
-        const existing = new Set(obs.map(dupeKey));
-        const nya = imported.filter(o => !existing.has(dupeKey(o)));
-        save([...obs, ...nya]);
-        setImportMsg(`${nya.length} nya observationer importerade (${imported.length - nya.length} dubbletter hoppades över).`);
-      } catch (err) { setImportErr(`Importfel: ${err.message}`); }
-    };
-    reader.readAsText(f);
+
+    if (f.name.endsWith(".xlsx") || f.name.endsWith(".xls")) {
+      reader.onload = ev => {
+        try {
+          const wb = XLSX.read(ev.target.result, { type: "array" });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          // Collect all non-empty cell values and find the JSON array
+          const cells = Object.values(ws)
+            .filter(cell => cell && cell.v !== undefined && typeof cell.v === "string")
+            .map(cell => cell.v.trim())
+            .filter(v => v.startsWith("[") || v.startsWith("{"));
+          if (!cells.length) throw new Error("Hittade ingen JSON-data i filen.");
+          // Try each candidate cell (handles both single-cell and multi-cell JSON)
+          const jsonStr = cells.length === 1 ? cells[0] : cells.join("");
+          mergeImported(JSON.parse(jsonStr));
+        } catch (err) { setImportErr(`Importfel: ${err.message}`); }
+      };
+      reader.readAsArrayBuffer(f);
+    } else {
+      reader.onload = ev => {
+        try { mergeImported(JSON.parse(ev.target.result)); }
+        catch (err) { setImportErr(`Importfel: ${err.message}`); }
+      };
+      reader.readAsText(f);
+    }
     e.target.value = "";
   };
 
@@ -193,8 +215,8 @@ export default function Ledtid() {
             <ActionButton onClick={handleExport}>Exportera JSON</ActionButton>
           )}
           <label style={{ cursor: "pointer", padding: "6px 12px", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 12, color: C.textDim }}>
-            Importera JSON
-            <input ref={fileRef} type="file" accept=".json" className="visually-hidden-input" onChange={handleImport} />
+            Importera JSON / Excel
+            <input ref={fileRef} type="file" accept=".json,.xlsx,.xls" className="visually-hidden-input" onChange={handleImport} />
           </label>
         </div>
       </div>
