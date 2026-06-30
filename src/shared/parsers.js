@@ -1,6 +1,150 @@
 import * as XLSX from "xlsx";
-import { CELL_MAP } from "./cellMap";
-import { readFlow, normKbana } from "./liveUtils";
+import { normKbana } from "./liveUtils";
+
+// ── etikett-baserad live-parser ───────────────────────────────────────────────
+
+const LABEL_RE = /^K-?(\d{2})(-\d+)?$/i;
+
+const KBANA_LINE = {
+  K51: "Line 1", K52: "Line 1/2", K53: "Line 1/2", K56: "Line 2/4",
+  K58: "Line 4/6", K59: "Line 6/7", K60: "Line 6/7", "K61-7": "Line 7",
+  K55: "Stn 36", "K61-36": "Stn 36", K62: "Stn 50",
+};
+
+function cellStr(R, r, c) {
+  return String(R[r]?.[c] ?? "").trim();
+}
+
+// "K-56" → "K56", "K-61" → "K61-7" or "K61-36" based on row position
+function normLabel(raw, row) {
+  const s = raw.replace(/-/g, "").toUpperCase();
+  if (s === "K61") return row < 45 ? "K61-7" : "K61-36";
+  return s;
+}
+
+function sumFlow(flows) {
+  return flows.reduce(
+    (a, f) => ({ iko: a.iko + f.iko, pavag: a.pavag + f.pavag, klart: a.klart + f.klart, total: a.total + f.total }),
+    { iko: 0, pavag: 0, klart: 0, total: 0 }
+  );
+}
+
+function parsePallBlock(R) {
+  // Find "antal pallar" header row
+  let headerRow = -1;
+  outer: for (let r = 0; r < R.length; r++) {
+    for (let c = 0; c < (R[r]?.length || 0); c++) {
+      if (cellStr(R, r, c).toLowerCase().includes("antal pallar")) { headerRow = r; break outer; }
+    }
+  }
+  if (headerRow < 0) return {};
+
+  const result = {};
+  // Find K-label row within 6 rows of header
+  for (let r = headerRow + 1; r <= headerRow + 6 && r < R.length; r++) {
+    let found = false;
+    for (let c = 0; c < (R[r]?.length || 0); c++) {
+      if (LABEL_RE.test(cellStr(R, r, c))) {
+        const kbana = normLabel(cellStr(R, r, c), 0); // pall K61 → always K61-7
+        result[kbana] = {
+          iko:   +R[r + 1]?.[c] || 0,
+          pavag: +R[r + 2]?.[c] || 0,
+          klart: +R[r + 3]?.[c] || 0,
+          total: +R[r + 4]?.[c] || 0,
+        };
+        found = true;
+      }
+    }
+    if (found) break;
+  }
+  return result;
+}
+
+function parseLiveByLabel(R) {
+  // 1. Scan all cells for K-bana labels
+  const labels = [];
+  for (let r = 0; r < R.length; r++) {
+    for (let c = 0; c < (R[r]?.length || 0); c++) {
+      if (LABEL_RE.test(cellStr(R, r, c))) labels.push({ raw: cellStr(R, r, c), row: r, col: c });
+    }
+  }
+  if (!labels.length) throw new Error("Hittade inga K-banor — fel fil eller flik?");
+
+  const kbanor = [];
+  for (const { raw, row: labelRow, col: labelCol } of labels) {
+    // 2. Search downward (max 8 rows) for "Påfyllningar" header
+    let pafyllCol = -1, kartCol = -1, headerRow = -1;
+    outer: for (let r = labelRow + 1; r <= labelRow + 8 && r < R.length; r++) {
+      for (let c = labelCol; c <= labelCol + 16; c++) {
+        const v = cellStr(R, r, c).toLowerCase();
+        if (v.includes("påfyllning")) { pafyllCol = c; headerRow = r; }
+        if (headerRow === r && v.includes("kartong")) kartCol = c;
+      }
+      if (pafyllCol >= 0) break outer;
+    }
+    // No Påfyllningar → pall-section or unrelated label, skip
+    if (pafyllCol < 0) continue;
+
+    // If Kartonger not found on header row, widen search right
+    if (kartCol < 0) {
+      for (let c = pafyllCol + 1; c <= pafyllCol + 16; c++) {
+        if (cellStr(R, headerRow, c).toLowerCase().includes("kartong")) { kartCol = c; break; }
+      }
+    }
+
+    // 3. Find rightmost "1. I kö" in cols [0, pafyllCol) below headerRow
+    //    "Rightmost" ensures we pick the row-label column for THIS K-bana's sub-block.
+    let ikoRow = -1, ikoCol = -1;
+    for (let r = headerRow + 1; r <= headerRow + 20 && r < R.length; r++) {
+      for (let c = 0; c < pafyllCol; c++) {
+        if (cellStr(R, r, c) === "1. I kö" && c > ikoCol) { ikoRow = r; ikoCol = c; }
+      }
+    }
+    if (ikoRow < 0) { console.warn(`K-bana ${raw}: ingen "1. I kö" hittad`); continue; }
+
+    // 4. Find "2. På väg", "3. Klart", "Total" in same column as "1. I kö"
+    let pavagRow = -1, klartRow = -1, totalRow = -1;
+    for (let r = ikoRow + 1; r <= ikoRow + 12 && r < R.length; r++) {
+      const v = cellStr(R, r, ikoCol);
+      if (v === "2. På väg")                 pavagRow = r;
+      else if (/^3\./i.test(v))              klartRow = r;
+      else if (v === "Total" && totalRow < 0) totalRow = r;
+    }
+    if (totalRow < 0) { console.warn(`K-bana ${raw}: ingen "Total"-rad hittad`); continue; }
+
+    // 5. Read values
+    const g = (r, c) => +R[r]?.[c] || 0;
+    const kbana = normLabel(raw, labelRow);
+    kbanor.push({
+      kbana,
+      line: KBANA_LINE[kbana] || "",
+      isPL: false,
+      pafyll: {
+        iko:   g(ikoRow,   pafyllCol),
+        pavag: pavagRow >= 0 ? g(pavagRow, pafyllCol) : 0,
+        klart: klartRow >= 0 ? g(klartRow, pafyllCol) : 0,
+        total: g(totalRow, pafyllCol),
+      },
+      kart: kartCol >= 0 ? {
+        iko:   g(ikoRow,   kartCol),
+        pavag: pavagRow >= 0 ? g(pavagRow, kartCol) : 0,
+        klart: klartRow >= 0 ? g(klartRow, kartCol) : 0,
+        total: g(totalRow, kartCol),
+      } : null,
+    });
+  }
+
+  const pallarPerK = parsePallBlock(R);
+  const total = {
+    pafyll: sumFlow(kbanor.map(k => k.pafyll)),
+    kart:   sumFlow(kbanor.filter(k => k.kart).map(k => k.kart)),
+  };
+
+  const allZero = kbanor.every(k => k.pafyll.total === 0);
+  if (allZero) throw new Error("Alla värden är noll — fel fil eller flik? Kontrollera att det är Visualisering-filen (Infattning SDS).");
+
+  return { kbanor: kbanor.filter(k => k.pafyll.total > 0 || k.isPL), pallarPerK, total };
+}
 
 export function parseStaffingFile(file) {
   return new Promise((resolve, reject) => {
@@ -37,18 +181,8 @@ export function parseLive(file) {
         const wb = XLSX.read(e.target.result, { type: "array" });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const R = XLSX.utils.sheet_to_json(sheet, { defval: "", header: 1 });
-        const kbanor = CELL_MAP.kbanor.map(def => ({
-          kbana: def.kbana, line: def.line, isPL: def.isPL,
-          pafyll: readFlow(R, def.pafyll),
-          kart:   def.kart ? readFlow(R, def.kart) : null,
-        }));
-        const pallarPerK = Object.fromEntries(
-          Object.entries(CELL_MAP.pallarPerK).map(([k, coords]) => [k, readFlow(R, coords)])
-        );
-        const total = { pafyll: readFlow(R, CELL_MAP.total.pafyll), kart: readFlow(R, CELL_MAP.total.kart) };
-        const allZero = kbanor.every(k => k.pafyll.total === 0 && !k.isPL);
-        if (allZero) throw new Error("Alla värden är noll — fel fil eller flik? Kontrollera att det är Visualisering-filen (Infattning SDS).");
-        resolve({ kbanor: kbanor.filter(k => k.pafyll.total > 0 || k.isPL), pallarPerK, total, fileName: file.name, loaded: new Date().toLocaleTimeString("sv-SE") });
+        const result = parseLiveByLabel(R);
+        resolve({ ...result, fileName: file.name, loaded: new Date().toLocaleTimeString("sv-SE") });
       } catch (err) { reject(err); }
     };
     reader.onerror = reject;
