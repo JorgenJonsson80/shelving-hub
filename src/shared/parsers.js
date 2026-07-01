@@ -70,26 +70,37 @@ function parseLiveByLabel(R) {
   }
   if (!labels.length) throw new Error("Hittade inga K-banor — fel fil eller flik?");
 
+  // Sort so nextLabelCol lookup works correctly
+  labels.sort((a, b) => a.row - b.row || a.col - b.col);
+
+  // Returns the column of the nearest label to the right in the same block (±3 rows).
+  // This is the territory boundary — we never search past a neighbour's column.
+  function nextLabelCol(labelRow, labelCol) {
+    let bound = Infinity;
+    for (const l of labels) {
+      if (Math.abs(l.row - labelRow) <= 3 && l.col > labelCol && l.col < bound) bound = l.col;
+    }
+    return bound;
+  }
+
   const kbanor = [];
   for (const { raw, row: labelRow, col: labelCol } of labels) {
-    // 2. Search downward (max 8 rows) for "Påfyllningar" header
+    const revir = nextLabelCol(labelRow, labelCol);
+
+    // 2. Search downward (max 8 rows) for "Påfyllningar" header — stop at neighbour's column
     let pafyllCol = -1, kartCol = -1, headerRow = -1;
     outer: for (let r = labelRow + 1; r <= labelRow + 8 && r < R.length; r++) {
-      for (let c = labelCol; c <= labelCol + 16; c++) {
+      for (let c = labelCol; c < Math.min(labelCol + 16, revir); c++) {
         const v = cellStr(R, r, c).toLowerCase();
-        if (v.includes("påfyllning")) { pafyllCol = c; headerRow = r; }
-        if (headerRow === r && v.includes("kartong")) kartCol = c;
+        if (v.includes("påfyllning")) { pafyllCol = c; headerRow = r; break outer; }
       }
-      if (pafyllCol >= 0) break outer;
     }
     // No Påfyllningar → pall-section or unrelated label, skip
     if (pafyllCol < 0) continue;
 
-    // If Kartonger not found on header row, widen search right
-    if (kartCol < 0) {
-      for (let c = pafyllCol + 1; c <= pafyllCol + 16; c++) {
-        if (cellStr(R, headerRow, c).toLowerCase().includes("kartong")) { kartCol = c; break; }
-      }
+    // Find Kartonger on same header row, within territory
+    for (let c = pafyllCol + 1; c < Math.min(pafyllCol + 16, revir); c++) {
+      if (cellStr(R, headerRow, c).toLowerCase().includes("kartong")) { kartCol = c; break; }
     }
 
     // 3. Find rightmost "1. I kö" in cols [0, pafyllCol) below headerRow
