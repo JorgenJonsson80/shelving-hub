@@ -2,6 +2,13 @@ import { useState, useEffect, useMemo } from "react";
 import { C } from "../shared/theme";
 import { Alert, Dropzone, Panel } from "../shared/components";
 import { parsePFExport } from "../shared/parsers";
+import { classifyLocation } from "../shared/liveUtils";
+
+function toMin(str) {
+  if (!str) return null;
+  const [h, m] = String(str).split(":").map(Number);
+  return isNaN(h) ? null : h * 60 + (m || 0);
+}
 
 // Empirical cumulative curve — 9 days of data (5–25 Jun 2026, 15 033 rows)
 // Index 0 = pct done by end of hour 5, index 11 = end of hour 16
@@ -59,11 +66,12 @@ function HourBar({ perTimme, highlight }) {
 }
 
 export default function Prognos() {
-  const [drag, setDrag]           = useState(false);
-  const [todayData, setTodayData] = useState(null);
-  const [err, setErr]             = useState(null);
-  const [now, setNow]             = useState(() => new Date());
+  const [drag, setDrag]             = useState(false);
+  const [todayData, setTodayData]   = useState(null);
+  const [err, setErr]               = useState(null);
+  const [now, setNow]               = useState(() => new Date());
   const [storedDays, setStoredDays] = useState(() => lsGet("prognos_days_v1", []));
+  const [filterVeckodag, setFilterVeckodag] = useState(false);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
@@ -120,6 +128,88 @@ export default function Prognos() {
       daysCount: storedDays.length,
     };
   }, [todayData, nowHour, storedDays]);
+
+  const kbanaForecast = useMemo(() => {
+    if (!forecast || forecast.tooEarly) return null;
+
+    const pafyllDays = lsGet("pafyll_days_v1", []);
+    const daysWithRows = pafyllDays.filter(d => Array.isArray(d.rows) && d.rows.length > 0);
+    if (!daysWithRows.length) return null;
+
+    const todayWd = new Date().getDay();
+    const days = filterVeckodag
+      ? daysWithRows.filter(d => new Date(d.datum + "T12:00:00").getDay() === todayWd)
+      : daysWithRows;
+    if (!days.length) return null;
+
+    // Aggregate per K-bana across historical days
+    const hist = {};       // kb → { pf, src, pt:[24] }
+    const srcTot = { GM: 0, Mezz: 0, ULC: 0, PL09: 0 };
+
+    for (const day of days) {
+      const dayKb = {};
+      for (const row of day.rows) {
+        const kb = classifyLocation(row.toLoc);
+        if (!kb) continue;
+        if (!dayKb[kb]) dayKb[kb] = { pf: 0, src: { GM:0,Mezz:0,ULC:0,PL09:0 }, pt: Array(24).fill(0) };
+        dayKb[kb].pf++;
+        if (row.kalla in dayKb[kb].src) dayKb[kb].src[row.kalla]++;
+        if (row.hour >= 0 && row.hour < 24) dayKb[kb].pt[row.hour]++;
+      }
+      for (const [kb, d] of Object.entries(dayKb)) {
+        if (!hist[kb]) hist[kb] = { pf: 0, src: { GM:0,Mezz:0,ULC:0,PL09:0 }, pt: Array(24).fill(0) };
+        hist[kb].pf += d.pf;
+        for (const s of ["GM","Mezz","ULC","PL09"]) { hist[kb].src[s] += d.src[s]; srcTot[s] += d.src[s]; }
+        d.pt.forEach((v, h) => { hist[kb].pt[h] += v; });
+      }
+    }
+
+    // Remaining per source from today's prognos
+    const kvarSrc = {
+      GM:   forecast.gm.kvar   ?? 0,
+      Mezz: forecast.mezz.kvar ?? 0,
+      ULC:  forecast.ulc.kvar  ?? 0,
+      PL09: forecast.pl09.kvar ?? 0,
+    };
+
+    // Median lead time per K-bana from ledtid_obs_v1
+    const ledtidObs = lsGet("ledtid_obs_v1", []);
+    const ledtidKb = {};
+    for (const kb of Object.keys(hist)) {
+      const times = ledtidObs
+        .filter(o => o.kbana === kb)
+        .map(o => { const sk = toMin(o.skickad), kl = toMin(o.klar); if (sk==null||kl==null) return null; const d=kl-sk; return d<0?d+1440:d; })
+        .filter(v => v != null);
+      if (times.length) { const s=[...times].sort((a,b)=>a-b); ledtidKb[kb]=s[Math.floor(s.length/2)]; }
+    }
+
+    const result = [];
+    for (const [kb, h] of Object.entries(hist)) {
+      // Expected remaining PF for this K-bana
+      const exp = ["GM","Mezz","ULC","PL09"].reduce((s, src) => {
+        return s + kvarSrc[src] * (srcTot[src] > 0 ? h.src[src] / srcTot[src] : 0);
+      }, 0);
+      if (exp < 1) continue;
+
+      // Future hour shares (hours after now)
+      const futPt = h.pt.map((v, hour) => hour >= nowHour ? v : 0);
+      const futSum = futPt.reduce((s, v) => s + v, 0);
+
+      // Distribute expected PF across future hours, shifted by lead time
+      const shiftH = ledtidKb[kb] ? Math.round(ledtidKb[kb] / 60) : 0;
+      const timme = Array(24).fill(0);
+      if (futSum > 0) {
+        futPt.forEach((v, hour) => {
+          if (v > 0) timme[Math.min(23, hour + shiftH)] += Math.round(exp * v / futSum);
+        });
+      }
+
+      const topp = timme.indexOf(Math.max(...timme));
+      result.push({ kb, exp: Math.round(exp), timme, topp, ledtidMins: ledtidKb[kb] || 0 });
+    }
+
+    return result.sort((a, b) => b.exp - a.exp);
+  }, [forecast, nowHour, filterVeckodag]);
 
   const tidStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
@@ -248,6 +338,38 @@ export default function Prognos() {
               </div>
             </div>
           </Panel>
+
+          {/* Per K-bana forecast */}
+          {kbanaForecast?.length > 0 && (
+            <Panel title="PROGNOS PER K-BANA">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <span style={{ fontSize: 11, color: C.dim }}>
+                  Baserat på historiska mönster{kbanaForecast.some(k => k.ledtidMins > 0) ? " · förskjutet med ledtid" : ""}
+                </span>
+                <button
+                  onClick={() => setFilterVeckodag(v => !v)}
+                  style={{ fontSize: 11, padding: "3px 10px", borderRadius: 6, cursor: "pointer",
+                    border: `1px solid ${filterVeckodag ? C.accent : C.border}`,
+                    background: filterVeckodag ? C.accent + "22" : "transparent",
+                    color: filterVeckodag ? C.accent : C.textDim }}>
+                  {["Sön","Mån","Tis","Ons","Tor","Fre","Lör"][new Date().getDay()]}dagar
+                </button>
+              </div>
+              {kbanaForecast.map(k => (
+                <div key={k.kb} style={{ marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{k.kb}</span>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 11 }}>
+                      {k.ledtidMins > 0 && <span style={{ color: C.dim }}>+{k.ledtidMins}min ledtid</span>}
+                      {k.timme[k.topp] > 0 && <span style={{ color: C.textDim }}>topp kl {k.topp}</span>}
+                      <span style={{ fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums" }}>~{k.exp} PF</span>
+                    </div>
+                  </div>
+                  <HourBar perTimme={k.timme} highlight={k.timme[k.topp] > 0 ? [k.topp, k.topp] : null} />
+                </div>
+              ))}
+            </Panel>
+          )}
         </div>
       )}
     </div>
