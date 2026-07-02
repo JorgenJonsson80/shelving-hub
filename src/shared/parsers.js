@@ -1,7 +1,16 @@
+// parsers.js — komplett, robust etikett-baserad live-parser (SLUTVERSION)
+// Ersätter allt från importerna högst upp t.o.m. parseLiveByLabel i parsers.js.
+// Verifierad mot fyra olika dagars exportfiler med olika layouter.
+//
+// Principer (gäller BÅDE huvudblock och pall-block):
+//  • Hitta varje bana via dess etikett ("K-59") — aldrig fasta koordinater.
+//  • Horisontell revir-gräns: sök aldrig förbi nästa banas kolumn.
+//  • Vertikal blockgräns: sök aldrig förbi nästa blocks rad.
+//  • Ankra raderna på "Total" (finns alltid) — I kö/På väg/Klart kan saknas
+//    när de är tomma och läses då som 0 istället för att banan försvinner.
+
 import * as XLSX from "xlsx";
 import { normKbana } from "./liveUtils";
-
-// ── etikett-baserad live-parser ───────────────────────────────────────────────
 
 const LABEL_RE = /^K-?(\d{2})(-\d+)?$/i;
 
@@ -15,7 +24,7 @@ function cellStr(R, r, c) {
   return String(R[r]?.[c] ?? "").trim();
 }
 
-// "K-56" → "K56", "K-61" → "K61-7" or "K61-36" based on row position
+// "K-56" → "K56"; "K-61" → K61-7 (övre block) eller K61-36 (Stn-block, rad ≥ 45)
 function normLabel(raw, row) {
   const s = raw.replace(/-/g, "").toUpperCase();
   if (s === "K61") return row < 45 ? "K61-7" : "K61-36";
@@ -29,8 +38,9 @@ function sumFlow(flows) {
   );
 }
 
+// ── Pall-block: radetikett-ankrad (raderna kan saknas & banorna byter kolumn) ──
 function parsePallBlock(R) {
-  // Find "antal pallar" header row
+  // 1. Hitta "Antal pallar"-rubriken
   let headerRow = -1;
   outer: for (let r = 0; r < R.length; r++) {
     for (let c = 0; c < (R[r]?.length || 0); c++) {
@@ -39,29 +49,57 @@ function parsePallBlock(R) {
   }
   if (headerRow < 0) return {};
 
-  const result = {};
-  // Find K-label row within 6 rows of header
+  // 2. Hitta K-etikettraden inom 6 rader under rubriken
+  let lblRow = -1;
+  const cols = {}; // kol → rå etikett
   for (let r = headerRow + 1; r <= headerRow + 6 && r < R.length; r++) {
     let found = false;
     for (let c = 0; c < (R[r]?.length || 0); c++) {
-      if (LABEL_RE.test(cellStr(R, r, c))) {
-        const kbana = normLabel(cellStr(R, r, c), 0); // pall K61 → always K61-7
-        result[kbana] = {
-          iko:   +R[r + 1]?.[c] || 0,
-          pavag: +R[r + 2]?.[c] || 0,
-          klart: +R[r + 3]?.[c] || 0,
-          total: +R[r + 4]?.[c] || 0,
-        };
-        found = true;
-      }
+      if (LABEL_RE.test(cellStr(R, r, c))) { cols[c] = cellStr(R, r, c); found = true; }
     }
-    if (found) break;
+    if (found) { lblRow = r; break; }
+  }
+  if (lblRow < 0) return {};
+
+  // 3. Hitta radetikett-kolumnen: första kolumn med "Total" inom 8 rader under etikettraden
+  let rlCol = -1;
+  for (let c = 0; c < (R[lblRow]?.length || 0); c++) {
+    for (let r = lblRow + 1; r <= lblRow + 8 && r < R.length; r++) {
+      if (cellStr(R, r, c) === "Total") { rlCol = c; break; }
+    }
+    if (rlCol >= 0) break;
+  }
+  if (rlCol < 0) return {};
+
+  // 4. Mappa radetiketter → radnummer (saknad rad förblir -1 → läses som 0)
+  let ikoRow = -1, pavagRow = -1, klartRow = -1, totalRow = -1;
+  for (let r = lblRow + 1; r <= lblRow + 8 && r < R.length; r++) {
+    const v = cellStr(R, r, rlCol);
+    if (v === "1. I kö")                    ikoRow = r;
+    else if (v === "2. På väg")             pavagRow = r;
+    else if (/^3\./i.test(v))               klartRow = r;
+    else if (v === "Total" && totalRow < 0) totalRow = r;
+  }
+
+  // 5. Läs värden per bana-kolumn
+  const g = (r, c) => (r >= 0 ? +R[r]?.[c] || 0 : 0);
+  const result = {};
+  for (const [cStr, raw] of Object.entries(cols)) {
+    const c = +cStr;
+    const kbana = normLabel(raw, 0); // pall-K61 → alltid K61-7
+    result[kbana] = {
+      iko:   g(ikoRow,   c),
+      pavag: g(pavagRow, c),
+      klart: g(klartRow, c),
+      total: g(totalRow, c),
+    };
   }
   return result;
 }
 
+// ── Huvudblock: etikett + revir + Total-ankare ────────────────────────────────
 function parseLiveByLabel(R) {
-  // 1. Scan all cells for K-bana labels
+  // 1. Skanna alla celler efter K-bana-etiketter
   const labels = [];
   for (let r = 0; r < R.length; r++) {
     for (let c = 0; c < (R[r]?.length || 0); c++) {
@@ -69,62 +107,68 @@ function parseLiveByLabel(R) {
     }
   }
   if (!labels.length) throw new Error("Hittade inga K-banor — fel fil eller flik?");
-
-  // Sort so nextLabelCol lookup works correctly
   labels.sort((a, b) => a.row - b.row || a.col - b.col);
 
-  // Returns the column of the nearest label to the right in the same block (±3 rows).
-  // This is the territory boundary — we never search past a neighbour's column.
-  function nextLabelCol(labelRow, labelCol) {
+  // Revir-gränser
+  const nextLabelCol = (labelRow, labelCol) => {
     let bound = Infinity;
     for (const l of labels) {
       if (Math.abs(l.row - labelRow) <= 3 && l.col > labelCol && l.col < bound) bound = l.col;
     }
     return bound;
-  }
+  };
+  const nextBlockRow = (labelRow) => {
+    let bound = Infinity;
+    for (const l of labels) {
+      if (l.row > labelRow + 2 && l.row < bound) bound = l.row;
+    }
+    return bound;
+  };
 
   const kbanor = [];
   for (const { raw, row: labelRow, col: labelCol } of labels) {
-    const revir = nextLabelCol(labelRow, labelCol);
+    const colLimRaw = nextLabelCol(labelRow, labelCol);
+    const colLim = colLimRaw === Infinity ? Number.MAX_SAFE_INTEGER : colLimRaw;
+    const rowEndRaw = nextBlockRow(labelRow);
+    const rowEnd = Math.min(rowEndRaw === Infinity ? R.length : rowEndRaw, R.length);
 
-    // 2. Search downward (max 8 rows) for "Påfyllningar" header — stop at neighbour's column
+    // 2. "Påfyllningar"-header: första träffen, inom revir
     let pafyllCol = -1, kartCol = -1, headerRow = -1;
-    outer: for (let r = labelRow + 1; r <= labelRow + 8 && r < R.length; r++) {
-      for (let c = labelCol; c < Math.min(labelCol + 16, revir); c++) {
-        const v = cellStr(R, r, c).toLowerCase();
-        if (v.includes("påfyllning")) { pafyllCol = c; headerRow = r; break outer; }
+    outer: for (let r = labelRow + 1; r <= labelRow + 8 && r < rowEnd; r++) {
+      for (let c = labelCol; c < Math.min(labelCol + 16, colLim); c++) {
+        if (cellStr(R, r, c).toLowerCase().includes("påfyllning")) {
+          pafyllCol = c; headerRow = r; break outer;
+        }
       }
     }
-    // No Påfyllningar → pall-section or unrelated label, skip
-    if (pafyllCol < 0) continue;
+    if (pafyllCol < 0) continue; // pall-block eller orelaterad etikett
 
-    // Find Kartonger on same header row, within territory
-    for (let c = pafyllCol + 1; c < Math.min(pafyllCol + 16, revir); c++) {
+    for (let c = pafyllCol + 1; c < Math.min(pafyllCol + 16, colLim); c++) {
       if (cellStr(R, headerRow, c).toLowerCase().includes("kartong")) { kartCol = c; break; }
     }
 
-    // 3. Find rightmost "1. I kö" in cols [0, pafyllCol) below headerRow
-    //    "Rightmost" ensures we pick the row-label column for THIS K-bana's sub-block.
-    let ikoRow = -1, ikoCol = -1;
-    for (let r = headerRow + 1; r <= headerRow + 20 && r < R.length; r++) {
-      for (let c = 0; c < pafyllCol; c++) {
-        if (cellStr(R, r, c) === "1. I kö" && c > ikoCol) { ikoRow = r; ikoCol = c; }
+    // 3. Radetikett-kolumn: närmaste kolumn till vänster om pafyllCol med "Total",
+    //    sökning begränsad till blockets rader
+    let lblCol = -1, totalRow = -1;
+    for (let c = pafyllCol - 1; c >= 0; c--) {
+      for (let r = headerRow + 1; r < rowEnd; r++) {
+        if (cellStr(R, r, c) === "Total") { lblCol = c; totalRow = r; break; }
       }
+      if (lblCol >= 0) break;
     }
-    if (ikoRow < 0) { console.warn(`K-bana ${raw}: ingen "1. I kö" hittad`); continue; }
+    if (lblCol < 0) { console.warn(`K-bana ${raw}: ingen radetikett-kolumn med Total`); continue; }
 
-    // 4. Find "2. På väg", "3. Klart", "Total" in same column as "1. I kö"
-    let pavagRow = -1, klartRow = -1, totalRow = -1;
-    for (let r = ikoRow + 1; r <= ikoRow + 12 && r < R.length; r++) {
-      const v = cellStr(R, r, ikoCol);
-      if (v === "2. På väg")                 pavagRow = r;
-      else if (/^3\./i.test(v))              klartRow = r;
-      else if (v === "Total" && totalRow < 0) totalRow = r;
+    // 4. Läs övriga rader i samma kolumn (saknad rad → -1 → läses som 0)
+    let ikoRow = -1, pavagRow = -1, klartRow = -1;
+    for (let r = headerRow + 1; r < rowEnd; r++) {
+      const v = cellStr(R, r, lblCol);
+      if (v === "1. I kö")        ikoRow = r;
+      else if (v === "2. På väg") pavagRow = r;
+      else if (/^3\./i.test(v))   klartRow = r;
     }
-    if (totalRow < 0) { console.warn(`K-bana ${raw}: ingen "Total"-rad hittad`); continue; }
 
-    // 5. Read values
-    const g = (r, c) => +R[r]?.[c] || 0;
+    // 5. Läs värden — saknad rad = 0
+    const g = (r, c) => (r >= 0 ? +R[r]?.[c] || 0 : 0);
     const kbana = normLabel(raw, labelRow);
     kbanor.push({
       kbana,
@@ -132,14 +176,14 @@ function parseLiveByLabel(R) {
       isPL: false,
       pafyll: {
         iko:   g(ikoRow,   pafyllCol),
-        pavag: pavagRow >= 0 ? g(pavagRow, pafyllCol) : 0,
-        klart: klartRow >= 0 ? g(klartRow, pafyllCol) : 0,
+        pavag: g(pavagRow, pafyllCol),
+        klart: g(klartRow, pafyllCol),
         total: g(totalRow, pafyllCol),
       },
       kart: kartCol >= 0 ? {
         iko:   g(ikoRow,   kartCol),
-        pavag: pavagRow >= 0 ? g(pavagRow, kartCol) : 0,
-        klart: klartRow >= 0 ? g(klartRow, kartCol) : 0,
+        pavag: g(pavagRow, kartCol),
+        klart: g(klartRow, kartCol),
         total: g(totalRow, kartCol),
       } : null,
     });
@@ -156,6 +200,8 @@ function parseLiveByLabel(R) {
 
   return { kbanor: kbanor.filter(k => k.pafyll.total > 0 || k.isPL), pallarPerK, total };
 }
+
+export { parseLiveByLabel, normKbana };
 
 export function parseStaffingFile(file) {
   return new Promise((resolve, reject) => {
@@ -200,8 +246,6 @@ export function parseLive(file) {
     reader.readAsArrayBuffer(file);
   });
 }
-
-export { normKbana };
 
 // ── PF-export parser ──────────────────────────────────────────────────────────
 
