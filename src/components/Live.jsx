@@ -277,10 +277,7 @@ export default function Live() {
 
   const handleFile = (f) => {
     setErr(null);
-    parseLive(f).then(result => {
-      console.log("parseLive kbanor:", result.kbanor.map(k => k.kbana + "=" + k.pafyll.total));
-      setData(result);
-    }).catch(e => setErr(e.message));
+    parseLive(f).then(setData).catch(e => setErr(e.message));
   };
 
   const handleStaffingFile = (f) => {
