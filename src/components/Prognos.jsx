@@ -93,6 +93,14 @@ export default function Prognos() {
         try { localStorage.setItem("prognos_days_v1", JSON.stringify(next)); } catch {}
         return next;
       });
+      // Store full rows to pafyll_days_v1 for K-bana history
+      const pfDays = lsGet("pafyll_days_v1", []);
+      const existing = new Set(pfDays.map(d => d.datum));
+      const toAdd = days.filter(d => !existing.has(d.datum) && d.rows?.length > 0);
+      if (toAdd.length) {
+        const updated = [...pfDays, ...toAdd.map(({ datum, total, perKalla, rows }) => ({ datum, total, perKalla, rows }))].slice(-90);
+        try { localStorage.setItem("pafyll_days_v1", JSON.stringify(updated)); } catch {}
+      }
     }).catch(e => setErr(e.message));
   };
 
@@ -131,6 +139,15 @@ export default function Prognos() {
 
   const kbanaForecast = useMemo(() => {
     if (!forecast || forecast.tooEarly) return null;
+
+    // Today's already-processed PF per K-bana from uploaded file
+    const todayKbMap = {};
+    if (todayData?.rows) {
+      for (const row of todayData.rows) {
+        const kb = classifyLocation(row.toLoc);
+        if (kb) todayKbMap[kb] = (todayKbMap[kb] || 0) + 1;
+      }
+    }
 
     const pafyllDays = lsGet("pafyll_days_v1", []);
     const daysWithRows = pafyllDays.filter(d => Array.isArray(d.rows) && d.rows.length > 0);
@@ -205,11 +222,37 @@ export default function Prognos() {
       }
 
       const topp = timme.indexOf(Math.max(...timme));
-      result.push({ kb, exp: Math.round(exp), timme, topp, ledtidMins: ledtidKb[kb] || 0 });
+      const today = todayKbMap[kb] || 0;
+      result.push({ kb, exp: Math.round(exp), timme, topp, ledtidMins: ledtidKb[kb] || 0, today, estTotal: today + Math.round(exp) });
     }
 
-    return result.sort((a, b) => b.exp - a.exp);
-  }, [forecast, nowHour, filterVeckodag]);
+    return result.sort((a, b) => b.estTotal - a.estTotal);
+  }, [forecast, nowHour, filterVeckodag, todayData]);
+
+  const multiFill = useMemo(() => {
+    if (!todayData?.rows) return null;
+    const locCount = {};
+    for (const row of todayData.rows) {
+      if (!row.toLoc) continue;
+      const kb = classifyLocation(row.toLoc);
+      if (!kb) continue;
+      if (!locCount[row.toLoc]) locCount[row.toLoc] = { kb, count: 0 };
+      locCount[row.toLoc].count++;
+    }
+    const entries = Object.entries(locCount).filter(([, v]) => v.count >= 3);
+    if (!entries.length) return null;
+    const byKb = {};
+    for (const [loc, { kb, count }] of entries) {
+      if (!byKb[kb]) byKb[kb] = [];
+      byKb[kb].push({ loc, count });
+    }
+    for (const kb of Object.keys(byKb)) byKb[kb].sort((a, b) => b.count - a.count);
+    return Object.entries(byKb).sort((a, b) => {
+      const sa = a[1].reduce((s, x) => s + x.count, 0);
+      const sb = b[1].reduce((s, x) => s + x.count, 0);
+      return sb - sa;
+    });
+  }, [todayData]);
 
   const tidStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
@@ -344,7 +387,7 @@ export default function Prognos() {
             <Panel title="PROGNOS PER K-BANA">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <span style={{ fontSize: 11, color: C.dim }}>
-                  Baserat på historiska mönster{kbanaForecast.some(k => k.ledtidMins > 0) ? " · förskjutet med ledtid" : ""}
+                  Sett idag + estimerat kvar = dagstotal{kbanaForecast.some(k => k.ledtidMins > 0) ? " · förskjutet med ledtid" : ""}
                 </span>
                 <button
                   onClick={() => setFilterVeckodag(v => !v)}
@@ -360,12 +403,46 @@ export default function Prognos() {
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
                     <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{k.kb}</span>
                     <div style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 11 }}>
-                      {k.ledtidMins > 0 && <span style={{ color: C.dim }}>+{k.ledtidMins}min ledtid</span>}
+                      {k.ledtidMins > 0 && <span style={{ color: C.dim }}>+{k.ledtidMins}min</span>}
                       {k.timme[k.topp] > 0 && <span style={{ color: C.textDim }}>topp kl {k.topp}</span>}
-                      <span style={{ fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums" }}>~{k.exp} PF</span>
+                      {k.today > 0 && (
+                        <span style={{ color: C.dim, fontVariantNumeric: "tabular-nums" }}>
+                          {k.today} sett + ~{k.exp} kvar
+                        </span>
+                      )}
+                      <span style={{ fontWeight: 700, color: C.accent, fontVariantNumeric: "tabular-nums" }}>
+                        ~{k.estTotal > 0 ? k.estTotal : k.exp} tot
+                      </span>
                     </div>
                   </div>
                   <HourBar perTimme={k.timme} highlight={k.timme[k.topp] > 0 ? [k.topp, k.topp] : null} />
+                </div>
+              ))}
+            </Panel>
+          )}
+
+          {/* Multi-fill: platser som fyllts på 3+ ggr idag */}
+          {multiFill?.length > 0 && (
+            <Panel title="PLATSER MED MÅNGA PF IDAG">
+              <div style={{ fontSize: 12, color: C.dim, marginBottom: 12 }}>
+                Platser som tagit emot 3 eller fler PF hittills idag — kan indikera hög efterfrågan.
+              </div>
+              {multiFill.map(([kb, items]) => (
+                <div key={kb} style={{ marginBottom: 14 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: C.text, marginBottom: 6 }}>{kb}</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {items.map(({ loc, count }) => (
+                      <span key={loc} style={{
+                        padding: "3px 10px", borderRadius: 5, fontSize: 11,
+                        background: count >= 5 ? C.red + "22" : C.yellow + "22",
+                        border: `1px solid ${count >= 5 ? C.red + "44" : C.yellow + "44"}`,
+                        color: C.text,
+                      }}>
+                        {loc}{" "}
+                        <strong style={{ color: count >= 5 ? C.red : C.yellow }}>×{count}</strong>
+                      </span>
+                    ))}
+                  </div>
                 </div>
               ))}
             </Panel>
