@@ -1,4 +1,5 @@
 const PROXY_URL = import.meta.env.VITE_API_URL;
+const APP_KEY   = import.meta.env.VITE_APP_KEY;
 const API_KEY   = import.meta.env.VITE_ANTHROPIC_API_KEY;
 
 /**
@@ -11,7 +12,7 @@ export async function callAI(messages, maxTokens = 1000) {
 
   if (PROXY_URL) {
     url = PROXY_URL;
-    headers = { "Content-Type": "application/json" };
+    headers = { "Content-Type": "application/json", "X-App-Key": APP_KEY };
   } else {
     url = "https://api.anthropic.com/v1/messages";
     headers = {

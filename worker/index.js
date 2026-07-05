@@ -4,7 +4,9 @@
  * Setup:
  *   1. Paste this file into a new Cloudflare Worker
  *   2. Settings → Variables → add secret: ANTHROPIC_API_KEY = sk-ant-...
- *   3. Copy Worker URL → add as VITE_API_URL in GitHub repo secrets (with https://)
+ *   3. Settings → Variables → add secret: APP_SHARED_SECRET = (see below)
+ *   4. Copy Worker URL → add as VITE_API_URL in GitHub repo secrets (with https://)
+ *   5. Add the same APP_SHARED_SECRET value as VITE_APP_KEY in GitHub repo secrets
  */
 
 const ALLOWED_ORIGIN = "https://jorgenjonsson80.github.io";
@@ -12,7 +14,7 @@ const ALLOWED_ORIGIN = "https://jorgenjonsson80.github.io";
 const CORS = {
   "Access-Control-Allow-Origin":  ALLOWED_ORIGIN,
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, X-App-Key",
 };
 
 export default {
@@ -24,6 +26,12 @@ export default {
 
     if (request.method !== "POST") {
       return new Response("Method not allowed", { status: 405, headers: CORS });
+    }
+
+    // Shared-secret check — CORS alone only stops browsers, not direct calls.
+    // Raises the bar from "guess the worker URL" to "extract the key from the bundle".
+    if (request.headers.get("X-App-Key") !== env.APP_SHARED_SECRET) {
+      return new Response("Unauthorized", { status: 401, headers: CORS });
     }
 
     try {

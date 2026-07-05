@@ -11,6 +11,7 @@ export function classifyLocation(loc) {
 
   // P-prefix format
   if (s.startsWith("PD")) return "K62";
+  if (s.startsWith("PH")) return "K63";
   if (!/^P\d/.test(s)) return null;
   const stn = parseInt(s.substring(3, 5), 10);
   if (isNaN(stn)) return null;
@@ -20,10 +21,12 @@ export function classifyLocation(loc) {
   const lastDigit = lpl !== null ? lpl % 10 : null;
   const isEven = lastDigit !== null && lastDigit % 2 === 0;
   const isOdd  = lastDigit !== null && lastDigit % 2 === 1;
-  const t7 = s[6], t8 = s[7], t10 = s[9], t11 = s[10];
-  const t1011 = (t10 || "") + (t11 || "");
-  // P3 → allt till K55 tills vidare (K55/K61-36-split utkommenterad nedan)
+  // P3 → allt till K55 tills vidare. Tidigare gav vissa P3-koder K61-36 istället
+  // (se bevarad logik nedan) — oklart om det behövs igen i framtiden, så den
+  // tas inte bort, bara ur bruk.
   if (s.startsWith("P3")) return "K55";
+  // const t7 = s[6], t8 = s[7], t10 = s[9], t11 = s[10];
+  // const t1011 = (t10 || "") + (t11 || "");
   // if (s.startsWith("P3")) {
   //   const t7d = /[0-9]/.test(t7 || "");
   //   const n = parseInt(t1011, 10);

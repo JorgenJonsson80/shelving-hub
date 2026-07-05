@@ -42,6 +42,10 @@ describe("classifyLocation", () => {
     expect(classifyLocation("PD-123")).toBe("K62");
   });
 
+  it("resolves PH-prefix → K63", () => {
+    expect(classifyLocation("PH-123")).toBe("K63");
+  });
+
   it("resolves P3-prefix → K55", () => {
     // P3xx-yy format: substring(3,5) must be numeric for the function to proceed
     expect(classifyLocation("P3-60-A-12")).toBe("K55");
