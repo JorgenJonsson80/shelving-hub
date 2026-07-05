@@ -1,7 +1,7 @@
 import { C } from "../../shared/theme";
 import { Panel } from "../../shared/components";
 import {
-  calcWork, getShiftBounds, getWorkerStatus, fmtMins, toMins,
+  calcWork, getShiftBounds, getWorkerStatus, fmtMins,
 } from "../../shared/liveUtils";
 
 export function FlowBar({ iko, pavag, klart, total }) {

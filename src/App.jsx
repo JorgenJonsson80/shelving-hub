@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "./shared/supabaseClient";
+import Login from "./shared/Login";
 import Live from "./components/Live";
 import Bemanning from "./components/Bemanning";
 import Brief from "./components/Brief";
@@ -21,6 +23,19 @@ const TABS = [
 
 export default function App() {
   const [tab, setTab] = useState("live");
+  const [session, setSession] = useState(undefined); // undefined = still checking, null = logged out
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  if (session === undefined) return null; // avoid a login-screen flash while checking
+  if (!session) return <Login />;
+
   return (
     <div className="app-shell">
       <div className="topbar">
@@ -44,6 +59,10 @@ export default function App() {
             );
           })}
         </div>
+
+        <button className="logout-button" onClick={() => supabase.auth.signOut()}>
+          Logga ut
+        </button>
       </div>
 
       <div className="app-main">

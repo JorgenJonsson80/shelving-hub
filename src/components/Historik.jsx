@@ -1,6 +1,7 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { C } from "../shared/theme";
+import { supabase } from "../shared/supabaseClient";
 import {
   ActionButton,
   BedomingPill,
@@ -14,26 +15,56 @@ import {
 import { parseDailyRows } from "../shared/parseDailyRows";
 
 const KBANA_ORDER = ["K51","K52","K53","K55","K56","K58","K59","K60","K61-7","K61-36","K62","K63"];
-const STORAGE_KEY = "shelving_history_v2";
+// Old localStorage key — no longer written to, only read once for the
+// one-time "import my local history into Supabase" migration button.
+const LEGACY_STORAGE_KEY = "shelving_history_v2";
 const MONTHS_SV = ["Januari","Februari","Mars","April","Maj","Juni","Juli","Augusti","September","Oktober","November","December"];
 const MONTHS_SHORT = ["jan","feb","mar","apr","maj","jun","jul","aug","sep","okt","nov","dec"];
 
-function loadHistory() {
+function loadLegacyLocalHistory() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
   }
-  return {};
 }
 
-function saveHistory(h) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(h));
-  } catch {
-    // localStorage can be unavailable in private or restricted browser contexts.
+function rowToDay(row) {
+  return { dateStr: row.date_str, fileName: row.file_name, rows: row.rows, summary: row.summary };
+}
+
+async function fetchHistory() {
+  const { data, error } = await supabase.from("historik_days").select("*").order("date_str");
+  if (error) throw error;
+  const h = {};
+  for (const row of data) {
+    const m = row.date_str.substring(0, 7);
+    if (!h[m]) h[m] = {};
+    h[m][row.date_str] = rowToDay(row);
   }
+  return h;
+}
+
+async function upsertDay(d) {
+  const { error } = await supabase.from("historik_days").upsert({
+    date_str: d.dateStr,
+    file_name: d.fileName,
+    rows: d.rows,
+    summary: d.summary,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
+async function deleteDay(dateStr) {
+  const { error } = await supabase.from("historik_days").delete().eq("date_str", dateStr);
+  if (error) throw error;
+}
+
+async function deleteAllDays() {
+  const { error } = await supabase.from("historik_days").delete().not("date_str", "is", null);
+  if (error) throw error;
 }
 
 function getLatestSelection(h) {
@@ -224,18 +255,27 @@ function SnitTabell({ agg }) {
 }
 
 export default function Historik() {
-  const [initialState] = useState(() => {
-    const history = loadHistory();
-    const selection = getLatestSelection(history);
-    return { history, selection };
-  });
-
-  const [history, setHistory] = useState(initialState.history);
+  const [history, setHistory] = useState({});
+  const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState("");
-  const [selMonth, setSelMonth] = useState(initialState.selection.month);
-  const [selDay, setSelDay] = useState(initialState.selection.day);
+  const [selMonth, setSelMonth] = useState(null);
+  const [selDay, setSelDay] = useState(null);
   const [view, setView] = useState("dag");
+  const [legacyLocal] = useState(() => loadLegacyLocalHistory());
+
+  useEffect(() => {
+    fetchHistory().then(h => {
+      setHistory(h);
+      const sel = getLatestSelection(h);
+      setSelMonth(sel.month);
+      setSelDay(sel.day);
+      setLoading(false);
+    }).catch(err => {
+      setMsg("Kunde inte läsa historik: " + err.message);
+      setLoading(false);
+    });
+  }, []);
 
   const handleFiles = useCallback(async (files) => {
     setUploading(true);
@@ -245,13 +285,13 @@ export default function Historik() {
       try {
         const d = await parseDailyFile(f);
         if (!d.dateStr || !d.rows.length) continue;
+        await upsertDay(d);
         const m = d.dateStr.substring(0, 7);
         if (!nh[m]) nh[m] = {};
         nh[m][d.dateStr] = d;
         ok++;
       } catch { fail++; }
     }
-    saveHistory(nh);
     setHistory(nh);
     const months = Object.keys(nh).sort();
     if (months.length) {
@@ -263,6 +303,23 @@ export default function Historik() {
     setMsg(ok + " filer inlästa" + (fail ? " (" + fail + " fel)" : ""));
     setUploading(false);
   }, [history]);
+
+  const importLegacyLocal = useCallback(async () => {
+    const days = Object.values(legacyLocal).flatMap(month => Object.values(month));
+    if (!days.length) return;
+    setUploading(true);
+    let ok = 0, fail = 0;
+    for (const d of days) {
+      try { await upsertDay(d); ok++; } catch { fail++; }
+    }
+    const h = await fetchHistory();
+    setHistory(h);
+    const sel = getLatestSelection(h);
+    setSelMonth(sel.month);
+    setSelDay(sel.day);
+    setMsg(ok + " lokala dagar importerade" + (fail ? " (" + fail + " fel)" : ""));
+    setUploading(false);
+  }, [legacyLocal]);
 
   const allMonths = useMemo(() => Object.keys(history).sort().reverse(), [history]);
 
@@ -321,20 +378,33 @@ export default function Historik() {
         </div>
         <div className="historik__topbar-actions">
           {msg && <span className="historik__msg">{msg}</span>}
+          {Object.keys(legacyLocal).length > 0 && (
+            <ActionButton onClick={importLegacyLocal} disabled={uploading}>
+              Importera min lokala historik
+            </ActionButton>
+          )}
           <label className="historik__upload">
             {uploading ? "Laddar..." : "Lägg till filer"}
             <input type="file" multiple accept=".xlsx" className="visually-hidden-input"
               onChange={e => { const f = Array.from(e.target.files); if (f.length) handleFiles(f); }} />
           </label>
           {allMonths.length > 0 && (
-            <ActionButton onClick={() => { saveHistory({}); setHistory({}); setSelMonth(null); setSelDay(null); }}>
+            <ActionButton onClick={async () => {
+              if (!confirm("Ta bort ALL historik permanent (delas av hela teamet)? Går inte att ångra.")) return;
+              await deleteAllDays();
+              setHistory({}); setSelMonth(null); setSelDay(null);
+            }}>
               Rensa
             </ActionButton>
           )}
         </div>
       </div>
 
-      {!allMonths.length ? (
+      {loading ? (
+        <div className="historik__empty">
+          <div className="historik__empty-text">Laddar historik...</div>
+        </div>
+      ) : !allMonths.length ? (
         <div className="historik__empty">
           <div className="historik__empty-icon">&#128193;</div>
           <div className="historik__empty-text">
@@ -389,12 +459,12 @@ export default function Historik() {
                   </button>
                   <ActionButton
                     style={{ marginLeft: "auto" }}
-                    onClick={() => {
+                    onClick={async () => {
                       const nh = { ...history };
                       if (selDay && selMonth) {
+                        await deleteDay(selDay);
                         delete nh[selMonth][selDay];
                         if (!Object.keys(nh[selMonth]).length) delete nh[selMonth];
-                        saveHistory(nh);
                         setHistory(nh);
                         const months = Object.keys(nh).sort();
                         if (months.length) {

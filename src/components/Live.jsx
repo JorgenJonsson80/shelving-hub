@@ -3,6 +3,7 @@ import { C } from "../shared/theme";
 import { ActionButton, Alert, Dropzone, PageHeader, Panel } from "../shared/components";
 import { defaultBastid, normKbana, getWorkerStatus, calcLaneMetrics } from "../shared/liveUtils";
 import { parseLive, parseStaffingFile } from "../shared/parsers";
+import { useSetting } from "../shared/useSetting";
 import {
   FlowBar, StatusPill, AheadBehindPill, WorkCalc, ScheduleOverview, PassSettings,
 } from "./live/LiveSubComponents";
@@ -133,34 +134,23 @@ const DEFAULT_PASSES = {
   P8: { start: "06:00", end: "14:00" },
 };
 
-function ls(key, fallback) {
-  try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback; }
-  catch { return fallback; }
-}
-
 export default function Live() {
   const [data,            setData]            = useState(null);
   const [err,             setErr]             = useState(null);
   const [drag,            setDrag]            = useState(false);
   const [staffing,        setStaffing]        = useState(null);
   const [staffErr,        setStaffErr]        = useState(null);
-  const [manualBemanning, setManualBemanning] = useState(() => ls("live_bemanning", {}));
-  const [manualPall,      setManualPall]      = useState(() => ls("live_pall", {}));
-  const [schedule,        setSchedule]        = useState(() => ls("live_schedule", {}));
-  const [bastidPerK,      setBastidPerK]      = useState(() => ls("live_bastid", {}));
-  const [passes,          setPasses]          = useState(() => ls("live_passes", DEFAULT_PASSES));
+  const [manualBemanning, setManualBemanning] = useSetting("live_bemanning", {});
+  const [manualPall,      setManualPall]      = useSetting("live_pall", {});
+  const [schedule,        setSchedule]        = useSetting("live_schedule", {});
+  const [bastidPerK,      setBastidPerK]      = useSetting("live_bastid", {});
+  const [passes,          setPasses]          = useSetting("live_passes", DEFAULT_PASSES);
   const [now,             setNow]             = useState(() => new Date());
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(id);
   }, []);
-
-  useEffect(() => { localStorage.setItem("live_bemanning", JSON.stringify(manualBemanning)); }, [manualBemanning]);
-  useEffect(() => { localStorage.setItem("live_pall",      JSON.stringify(manualPall));      }, [manualPall]);
-  useEffect(() => { localStorage.setItem("live_schedule",  JSON.stringify(schedule));        }, [schedule]);
-  useEffect(() => { localStorage.setItem("live_bastid",    JSON.stringify(bastidPerK));      }, [bastidPerK]);
-  useEffect(() => { localStorage.setItem("live_passes",    JSON.stringify(passes));           }, [passes]);
 
   const nowMins = now.getHours() * 60 + now.getMinutes();
 

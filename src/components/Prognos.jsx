@@ -3,6 +3,7 @@ import { C } from "../shared/theme";
 import { Alert, Dropzone, Panel } from "../shared/components";
 import { parsePFExport } from "../shared/parsers";
 import { classifyLocation } from "../shared/liveUtils";
+import { fetchPfDays, upsertPfDay } from "../shared/pfDaysDb";
 
 function toMin(str) {
   if (!str) return null;
@@ -70,7 +71,7 @@ export default function Prognos() {
   const [todayData, setTodayData]   = useState(null);
   const [err, setErr]               = useState(null);
   const [now, setNow]               = useState(() => new Date());
-  const [storedDays, setStoredDays] = useState(() => lsGet("prognos_days_v1", []));
+  const [storedDays, setStoredDays] = useState([]);
   const [filterVeckodag, setFilterVeckodag] = useState(false);
 
   useEffect(() => {
@@ -78,29 +79,24 @@ export default function Prognos() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    fetchPfDays().then(setStoredDays).catch(e => setErr(e.message));
+  }, []);
+
   const nowHour = now.getHours();
 
   const handleFile = (f) => {
     setErr(null);
-    parsePFExport(f).then(days => {
+    parsePFExport(f).then(async (days) => {
       if (!days.length) { setErr("Inga rader hittades i filen."); return; }
       const best = [...days].sort((a, b) => b.total - a.total)[0];
       setTodayData(best);
-      // Store for self-learning counter (last 90 completed days)
-      setStoredDays(prev => {
-        if (prev.some(d => d.datum === best.datum)) return prev;
-        const next = [...prev, { datum: best.datum, total: best.total, perKalla: best.perKalla }].slice(-90);
-        try { localStorage.setItem("prognos_days_v1", JSON.stringify(next)); } catch {}
-        return next;
-      });
-      // Store full rows to pafyll_days_v1 for K-bana history
-      const pfDays = lsGet("pafyll_days_v1", []);
-      const existing = new Set(pfDays.map(d => d.datum));
-      const toAdd = days.filter(d => !existing.has(d.datum) && d.rows?.length > 0);
-      if (toAdd.length) {
-        const updated = [...pfDays, ...toAdd.map(({ datum, total, perKalla, rows }) => ({ datum, total, perKalla, rows }))].slice(-90);
-        try { localStorage.setItem("pafyll_days_v1", JSON.stringify(updated)); } catch {}
+      // Store every day with real rows for K-bana history / self-learning curve.
+      const toUpsert = days.filter(d => d.rows?.length > 0);
+      for (const d of toUpsert) {
+        try { await upsertPfDay(d); } catch { /* skip failed day, keep going */ }
       }
+      setStoredDays(await fetchPfDays());
     }).catch(e => setErr(e.message));
   };
 
@@ -149,8 +145,7 @@ export default function Prognos() {
       }
     }
 
-    const pafyllDays = lsGet("pafyll_days_v1", []);
-    const daysWithRows = pafyllDays.filter(d => Array.isArray(d.rows) && d.rows.length > 0);
+    const daysWithRows = storedDays.filter(d => Array.isArray(d.rows) && d.rows.length > 0);
     if (!daysWithRows.length) return null;
 
     const todayWd = new Date().getDay();
@@ -227,7 +222,7 @@ export default function Prognos() {
     }
 
     return result.sort((a, b) => b.estTotal - a.estTotal);
-  }, [forecast, nowHour, filterVeckodag, todayData]);
+  }, [forecast, nowHour, filterVeckodag, todayData, storedDays]);
 
   const multiFill = useMemo(() => {
     if (!todayData?.rows) return null;

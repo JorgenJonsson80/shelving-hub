@@ -1,15 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { C } from "../shared/theme";
 import { Alert, Dropzone, Panel } from "../shared/components";
 import { parsePFExport } from "../shared/parsers";
 import { classifyLocation } from "../shared/liveUtils";
-
-const KBANA_ORDER = ["K58", "K55", "K61-36", "K56", "K62", "K61-7", "K51", "K60", "K59", "K52", "K53"];
-
-function lsGet(key, fallback) {
-  try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback; }
-  catch { return fallback; }
-}
+import { fetchPfDays, upsertPfDay, deleteAllPfDays, loadLegacyLocalPfDays } from "../shared/pfDaysDb";
 
 // Horizontal bar showing proportion (0–1)
 function PropBar({ value, color = C.blue, max = 1 }) {
@@ -141,23 +135,38 @@ function aggDays(days) {
 export default function Pafyllningsmonster() {
   const [drag, setDrag]     = useState(false);
   const [err, setErr]       = useState(null);
-  const [storedDays, setStoredDays] = useState(() => lsGet("pafyll_days_v1", []));
+  const [storedDays, setStoredDays] = useState([]);
   const [expandedKb, setExpandedKb] = useState(null);
+  const [legacyDays] = useState(() => loadLegacyLocalPfDays());
+  const [importing, setImporting] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    fetchPfDays().then(setStoredDays).catch(e => setErr(e.message));
+  }, []);
 
   const handleFiles = (fileOrFiles) => {
     setErr(null);
     const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
-    parsePFExport(files).then(days => {
+    parsePFExport(files).then(async (days) => {
       if (!days.length) { setErr("Inga rader hittades i filerna."); return; }
-      setStoredDays(prev => {
-        const existing = new Set(prev.map(d => d.datum));
-        const nyaDagar = days.filter(d => !existing.has(d.datum));
-        if (!nyaDagar.length) return prev;
-        const next = [...prev, ...nyaDagar].slice(-90);
-        try { localStorage.setItem("pafyll_days_v1", JSON.stringify(next)); } catch {}
-        return next;
-      });
+      for (const d of days) {
+        try { await upsertPfDay(d); } catch { /* skip failed day, keep going */ }
+      }
+      setStoredDays(await fetchPfDays());
     }).catch(e => setErr(e.message));
+  };
+
+  const importLegacyLocal = async () => {
+    if (!legacyDays.length) return;
+    setImporting(true);
+    let ok = 0, fail = 0;
+    for (const d of legacyDays) {
+      try { await upsertPfDay(d); ok++; } catch { fail++; }
+    }
+    setStoredDays(await fetchPfDays());
+    setMsg(ok + " lokala dagar importerade" + (fail ? " (" + fail + " fel)" : ""));
+    setImporting(false);
   };
 
   const { agg, tunga } = useMemo(() => {
@@ -174,8 +183,9 @@ export default function Pafyllningsmonster() {
   const nivå = (i) => i < 3 ? "tung" : i >= agg.length - 3 ? "lätt" : "medel";
   const nivåColor = (n) => n === "tung" ? C.red : n === "lätt" ? C.green : C.yellow;
 
-  const clearData = () => {
-    try { localStorage.removeItem("pafyll_days_v1"); } catch {}
+  const clearData = async () => {
+    if (!confirm("Ta bort ALL påfyllningsdata permanent (delas av hela teamet)? Går inte att ångra.")) return;
+    await deleteAllPfDays();
     setStoredDays([]);
   };
 
@@ -191,7 +201,14 @@ export default function Pafyllningsmonster() {
               : "Importera en eller flera PF-exportfiler för att bygga upp mönsteranalysen."}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {msg && <span style={{ fontSize: 12, color: C.dim }}>{msg}</span>}
+          {legacyDays.length > 0 && (
+            <button onClick={importLegacyLocal} disabled={importing}
+              style={{ padding: "6px 12px", background: "none", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 12, color: C.textDim, cursor: "pointer" }}>
+              {importing ? "Importerar..." : "Importera min lokala historik"}
+            </button>
+          )}
           <label style={{ cursor: "pointer", padding: "6px 12px", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 12, color: C.textDim }}>
             + Lägg till filer
             <input type="file" accept=".xlsx" multiple className="visually-hidden-input"
