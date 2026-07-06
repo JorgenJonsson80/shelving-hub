@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, Fragment } from "react";
 import { C } from "../shared/theme";
 import { Alert, Dropzone, Panel } from "../shared/components";
 import { parsePFExport } from "../shared/parsers";
@@ -271,8 +271,8 @@ export default function Pafyllningsmonster() {
                     const nc = nivåColor(nv);
                     const expanded = expandedKb === r.kbana;
                     return (
-                      <>
-                        <tr key={r.kbana}
+                      <Fragment key={r.kbana}>
+                        <tr
                           onClick={() => setExpandedKb(expanded ? null : r.kbana)}
                           style={{ cursor: "pointer", borderBottom: `1px solid ${C.border}` }}>
                           <td className="primary-cell" style={{ fontWeight: 700 }}>{r.kbana}</td>
@@ -336,7 +336,7 @@ export default function Pafyllningsmonster() {
                             </td>
                           </tr>
                         )}
-                      </>
+                      </Fragment>
                     );
                   })}
                 </tbody>
