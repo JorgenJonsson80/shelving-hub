@@ -5,7 +5,7 @@ import { defaultBastid, normKbana, getWorkerStatus, calcLaneMetrics } from "../s
 import { parseLive, parseStaffingFile } from "../shared/parsers";
 import { useSetting } from "../shared/useSetting";
 import {
-  FlowBar, StatusPill, AheadBehindPill, WorkCalc, ScheduleOverview, PassSettings,
+  FlowBar, StatusPill, AheadBehindPill, WorkCalc, ScheduleOverview, PassSettings, Topp3Panel,
 } from "./live/LiveSubComponents";
 
 const TROSKEL_TRIVIAL = 0.3;
@@ -168,11 +168,13 @@ export default function Live() {
       const getPall  = f => { const m = pallMan?.[f]; return (m !== undefined && m !== "") ? +m : +(pallFile?.[f] || 0); };
       const pallKvar  = getPall("iko") + getPall("pavag");
       const pallKlart = getPall("klart");
+      const kolliKvar = (kb.pafyll?.iko || 0) + (kb.pafyll?.pavag || 0);
+      const kartKvar  = kb.kart ? (kb.kart.iko || 0) + (kb.kart.pavag || 0) : 0;
 
       const { sen, pr, tk, jobbKvar, bem } = calcLaneMetrics(
         kb.pafyll, kb.kart, pallKvar, pallKlart, pers, sched, nowMins, bastid
       );
-      if (sen === null) return { id: kb.kbana, sen: 0, pr, tk: 0, jobbKvar: 0, bem, kategori: "saknas" };
+      if (sen === null) return { id: kb.kbana, sen: 0, pr, tk: 0, jobbKvar: 0, bem, kategori: "saknas", kartKvar, pallKvar, kolliKvar };
 
       const isLowPr  = pr != null && pr < 0.8;
       const isHighPr = pr != null && pr > 1.1;
@@ -186,7 +188,7 @@ export default function Live() {
       } else {
         kategori = "balans";
       }
-      return { id: kb.kbana, sen, pr, tk: tk ?? 0, jobbKvar: jobbKvar ?? 0, bem, kategori };
+      return { id: kb.kbana, sen, pr, tk: tk ?? 0, jobbKvar: jobbKvar ?? 0, bem, kategori, kartKvar, pallKvar, kolliKvar };
     });
 
     const lediga = banor
@@ -394,6 +396,8 @@ export default function Live() {
               </div>
             </div>
           )}
+
+          <Topp3Panel banor={analys.banor} />
 
           {/* ── Utsago-sektion v2 ── */}
           {(overtid || riskzon.length > 0 || synligaAtgarder.length > 0) && (

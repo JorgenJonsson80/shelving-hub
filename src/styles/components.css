@@ -807,3 +807,44 @@
   text-align: right;
   font: 700 12px var(--font-mono);
 }
+
+/* ── Topp 3 per kategori (Live) ────────────────────────────── */
+
+.topp3-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.topp3-card {
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--border-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+}
+
+.topp3-card__title {
+  font: 800 9px var(--font-mono);
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.topp3-card__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.topp3-card__kb {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.topp3-card__val {
+  color: var(--text-dim);
+  font: 700 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}

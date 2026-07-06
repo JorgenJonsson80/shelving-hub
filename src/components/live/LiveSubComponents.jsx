@@ -135,6 +135,57 @@ export function ScheduleOverview({ kbanor, schedule, nowMins }) {
   );
 }
 
+function top3(arr, sortFn) {
+  return [...arr].sort(sortFn).slice(0, 3);
+}
+
+export function Topp3Panel({ banor }) {
+  const valid = banor.filter(b => b.kategori !== "saknas");
+  if (!valid.length) return null;
+
+  const withPr = valid.filter(b => b.pr != null);
+  const fmtH = (h) => (h > 0 ? "+" : "") + h.toFixed(2) + "h";
+
+  const categories = [
+    { title: "MEST ÖVERSKOTT",   accent: C.green,  rows: top3(valid, (a, b) => b.sen - a.sen) },
+    { title: "MEST BEHOV",       accent: C.red,    rows: top3(valid, (a, b) => a.sen - b.sen) },
+    { title: "MEST KART I KÖ",   accent: C.yellow, rows: top3(valid, (a, b) => b.kartKvar - a.kartKvar) },
+    { title: "MINST KART I KÖ",  accent: C.blue,   rows: top3(valid, (a, b) => a.kartKvar - b.kartKvar) },
+    { title: "MEST PALL I KÖ",   accent: C.yellow, rows: top3(valid, (a, b) => b.pallKvar - a.pallKvar) },
+    { title: "MINST PALL I KÖ",  accent: C.blue,   rows: top3(valid, (a, b) => a.pallKvar - b.pallKvar) },
+    { title: "MEST KOLLI I KÖ",  accent: C.yellow, rows: top3(valid, (a, b) => b.kolliKvar - a.kolliKvar) },
+    { title: "MINST KOLLI I KÖ", accent: C.blue,   rows: top3(valid, (a, b) => a.kolliKvar - b.kolliKvar) },
+    { title: "TOPP-PRESTATION",  accent: C.green,  rows: top3(withPr, (a, b) => b.pr - a.pr) },
+    { title: "LÄGST PRESTATION", accent: C.red,    rows: top3(withPr, (a, b) => a.pr - b.pr) },
+  ];
+
+  const valFor = (title, b) => {
+    if (title.includes("ÖVERSKOTT") || title.includes("BEHOV")) return fmtH(b.sen);
+    if (title.includes("KART"))  return `${b.kartKvar}st`;
+    if (title.includes("PALL"))  return `${b.pallKvar}pll`;
+    if (title.includes("KOLLI")) return `${b.kolliKvar}st`;
+    return `${Math.round(b.pr * 100)}%`;
+  };
+
+  return (
+    <Panel title="TOPP 3 — PER KATEGORI">
+      <div className="topp3-grid">
+        {categories.filter(c => c.rows.length > 0).map(cat => (
+          <div key={cat.title} className="topp3-card" style={{ borderTopColor: cat.accent }}>
+            <div className="topp3-card__title" style={{ color: cat.accent }}>{cat.title}</div>
+            {cat.rows.map(b => (
+              <div key={b.id} className="topp3-card__row">
+                <span className="topp3-card__kb">{b.id}</span>
+                <span className="topp3-card__val">{valFor(cat.title, b)}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 export function PassSettings({ passes, onChange }) {
   return (
     <Panel title="PASS-TIDER" className="pass-settings">
