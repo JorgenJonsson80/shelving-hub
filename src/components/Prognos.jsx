@@ -41,6 +41,32 @@ function lsGet(key, fallback) {
   catch { return fallback; }
 }
 
+const VECKODAGAR = ["Sön","Mån","Tis","Ons","Tor","Fre","Lör"];
+
+function meanStd(values) {
+  const n = values.length;
+  if (n < 2) return null;
+  const mean = values.reduce((s, v) => s + v, 0) / n;
+  const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / n;
+  return { mean, std: Math.sqrt(variance), n };
+}
+
+const MIN_SAMPLES = 4;
+const Z_THRESHOLD = 2;
+
+// Per K-bana: total PF that day + count per källa, for one historical day's rows.
+function perKbanaStats(rows) {
+  const perKb = {};
+  for (const row of rows) {
+    const kb = classifyLocation(row.toLoc);
+    if (!kb) continue;
+    if (!perKb[kb]) perKb[kb] = { total: 0, kalla: { GM: 0, Mezz: 0, ULC: 0, PL09: 0 } };
+    perKb[kb].total++;
+    if (row.kalla in perKb[kb].kalla) perKb[kb].kalla[row.kalla]++;
+  }
+  return perKb;
+}
+
 // Simple inline bar chart — shows PF per hour (0–23)
 function HourBar({ perTimme, highlight }) {
   const max = Math.max(...perTimme, 1);
@@ -231,15 +257,18 @@ export default function Prognos() {
       if (!row.toLoc) continue;
       const kb = classifyLocation(row.toLoc);
       if (!kb) continue;
-      if (!locCount[row.toLoc]) locCount[row.toLoc] = { kb, count: 0 };
-      locCount[row.toLoc].count++;
+      if (!locCount[row.toLoc]) locCount[row.toLoc] = { kb, count: 0, vnrs: new Set(), kallor: new Set() };
+      const loc = locCount[row.toLoc];
+      loc.count++;
+      if (row.vnr) loc.vnrs.add(row.vnr);
+      loc.kallor.add(row.kalla);
     }
     const entries = Object.entries(locCount).filter(([, v]) => v.count >= 3);
     if (!entries.length) return null;
     const byKb = {};
-    for (const [loc, { kb, count }] of entries) {
+    for (const [loc, { kb, count, vnrs, kallor }] of entries) {
       if (!byKb[kb]) byKb[kb] = [];
-      byKb[kb].push({ loc, count });
+      byKb[kb].push({ loc, count, vnrs: [...vnrs], kallor: [...kallor] });
     }
     for (const kb of Object.keys(byKb)) byKb[kb].sort((a, b) => b.count - a.count);
     return Object.entries(byKb).sort((a, b) => {
@@ -248,6 +277,59 @@ export default function Prognos() {
       return sb - sa;
     });
   }, [todayData]);
+
+  const veckodagsAvvikelser = useMemo(() => {
+    if (!todayData?.rows) return null;
+    const todayWd = new Date().getDay();
+    const todayKb = perKbanaStats(todayData.rows);
+
+    // Historical days matching today's weekday, excluding today's own date
+    const historicalDays = storedDays
+      .filter(d => d.datum !== todayData.datum && d.rows?.length > 0)
+      .filter(d => new Date(d.datum + "T12:00:00").getDay() === todayWd)
+      .map(d => perKbanaStats(d.rows));
+    if (historicalDays.length < MIN_SAMPLES) return null;
+
+    const flags = [];
+    for (const [kb, today] of Object.entries(todayKb)) {
+      // Total volume for this K-bana vs. same weekday historically
+      const totals = historicalDays.filter(d => d[kb]).map(d => d[kb].total);
+      if (totals.length >= MIN_SAMPLES) {
+        const stat = meanStd(totals);
+        const floor = Math.max(stat.std, stat.mean * 0.1, 1);
+        const z = (today.total - stat.mean) / floor;
+        if (Math.abs(z) >= Z_THRESHOLD) {
+          flags.push({
+            z: Math.abs(z), kb,
+            text: `${today.total} PF idag — ovanligt ${z > 0 ? "högt" : "lågt"} för en ${VECKODAGAR[todayWd]}dag (snitt ${stat.mean.toFixed(0)}, ±${stat.std.toFixed(0)}, ${stat.n} dagar)`,
+            tone: z > 0 ? C.yellow : C.blue,
+          });
+        }
+      }
+      // Källmix vs. same weekday historically — only when today's volume is meaningful
+      if (today.total >= 3) {
+        for (const src of ["GM", "Mezz", "ULC", "PL09"]) {
+          const todayShare = today.kalla[src] / today.total;
+          const shares = historicalDays
+            .filter(d => d[kb] && d[kb].total >= 3)
+            .map(d => d[kb].kalla[src] / d[kb].total);
+          if (shares.length < MIN_SAMPLES) continue;
+          const stat = meanStd(shares);
+          const floor = Math.max(stat.std, 0.05);
+          const z = (todayShare - stat.mean) / floor;
+          if (Math.abs(z) >= Z_THRESHOLD) {
+            flags.push({
+              z: Math.abs(z), kb,
+              text: `${Math.round(todayShare * 100)}% ${src} idag — ovanligt ${z > 0 ? "högt" : "lågt"} för en ${VECKODAGAR[todayWd]}dag (snitt ${Math.round(stat.mean * 100)}%, ±${Math.round(stat.std * 100)}, ${stat.n} dagar)`,
+              tone: z > 0 ? C.yellow : C.blue,
+            });
+          }
+        }
+      }
+    }
+
+    return flags.sort((a, b) => b.z - a.z).slice(0, 5);
+  }, [todayData, storedDays]);
 
   const tidStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
@@ -390,7 +472,7 @@ export default function Prognos() {
                     border: `1px solid ${filterVeckodag ? C.accent : C.border}`,
                     background: filterVeckodag ? C.accent + "22" : "transparent",
                     color: filterVeckodag ? C.accent : C.textDim }}>
-                  {["Sön","Mån","Tis","Ons","Tor","Fre","Lör"][new Date().getDay()]}dagar
+                  {VECKODAGAR[new Date().getDay()]}dagar
                 </button>
               </div>
               {kbanaForecast.map(k => (
@@ -416,6 +498,21 @@ export default function Prognos() {
             </Panel>
           )}
 
+          {/* Avvikelser mot samma veckodags historiska mönster */}
+          {veckodagsAvvikelser?.length > 0 && (
+            <Panel title="AVVIKELSER MOT VECKODAGSMÖNSTER">
+              <div style={{ fontSize: 12, color: C.dim, marginBottom: 12 }}>
+                Källmix och volym idag jämfört med tidigare {VECKODAGAR[new Date().getDay()].toLowerCase()}dagar.
+              </div>
+              {veckodagsAvvikelser.map((a, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, padding: "8px 0", borderBottom: i < veckodagsAvvikelser.length - 1 ? `1px solid ${C.border}` : "none" }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: C.text, flexShrink: 0 }}>{a.kb}</span>
+                  <span style={{ fontSize: 12, color: a.tone }}>{a.text}</span>
+                </div>
+              ))}
+            </Panel>
+          )}
+
           {/* Multi-fill: platser som fyllts på 3+ ggr idag */}
           {multiFill?.length > 0 && (
             <Panel title="PLATSER MED MÅNGA PF IDAG">
@@ -426,16 +523,25 @@ export default function Prognos() {
                 <div key={kb} style={{ marginBottom: 14 }}>
                   <div style={{ fontWeight: 700, fontSize: 13, color: C.text, marginBottom: 6 }}>{kb}</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {items.map(({ loc, count }) => (
-                      <span key={loc} style={{
-                        padding: "3px 10px", borderRadius: 5, fontSize: 11,
+                    {items.map(({ loc, count, vnrs, kallor }) => (
+                      <div key={loc} style={{
+                        padding: "4px 10px", borderRadius: 5, fontSize: 11,
                         background: count >= 5 ? C.red + "22" : C.yellow + "22",
                         border: `1px solid ${count >= 5 ? C.red + "44" : C.yellow + "44"}`,
                         color: C.text,
                       }}>
-                        {loc}{" "}
-                        <strong style={{ color: count >= 5 ? C.red : C.yellow }}>×{count}</strong>
-                      </span>
+                        <div>
+                          {loc}{" "}
+                          <strong style={{ color: count >= 5 ? C.red : C.yellow }}>×{count}</strong>
+                        </div>
+                        {(vnrs.length > 0 || kallor.length > 0) && (
+                          <div style={{ fontSize: 10, color: C.dim, marginTop: 2 }}>
+                            {vnrs.length > 0 && <>VNR {vnrs.join(", ")}</>}
+                            {vnrs.length > 0 && kallor.length > 0 && " · "}
+                            {kallor.join(", ")}
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
                 </div>

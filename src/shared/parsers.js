@@ -320,6 +320,7 @@ export function parsePFExport(files) {
         const cTime = findColPF(headers, "creationtime",  "creation time");
         const cLoc  = findColPF(headers, "tolocation",    "to location");
         const cLbl  = findColPF(headers, "numberoflabels", "number of labels");
+        const cVnr  = findColPF(headers, "2nditemnumber", "2nd item number");
 
         if (cDate === -1 || cTime === -1) {
           throw new Error("Saknar kolumner Creation Date eller Creation Time i filen.");
@@ -334,6 +335,7 @@ export function parsePFExport(files) {
           const datum  = normDatePF(r[cDate]);
           const toLoc  = cLoc  >= 0 ? String(r[cLoc] ?? "")  : "";
           const labels = cLbl  >= 0 ? Number(r[cLbl]) || 0   : 0;
+          const vnr    = cVnr  >= 0 ? String(r[cVnr] ?? "").trim() : "";
 
           if (!datum || hour === null) continue;
 
@@ -358,7 +360,7 @@ export function parsePFExport(files) {
           d.perKalla[kalla]++;
           d.perTimme[hour]++;
           if (d.perTimmeKalla[kalla]) d.perTimmeKalla[kalla][hour]++;
-          d.rows.push({ kalla, hour, toLoc, labels });
+          d.rows.push({ kalla, hour, toLoc, labels, vnr });
         }
 
         resolve(Object.values(dayMap));
