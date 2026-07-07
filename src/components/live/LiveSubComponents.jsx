@@ -149,12 +149,12 @@ export function Topp3Panel({ banor }) {
   const categories = [
     { title: "MEST ÖVERSKOTT",   accent: C.green,  rows: top3(valid, (a, b) => b.sen - a.sen) },
     { title: "MEST BEHOV",       accent: C.red,    rows: top3(valid, (a, b) => a.sen - b.sen) },
-    { title: "MEST KART I KÖ",   accent: C.yellow, rows: top3(valid, (a, b) => b.kartKvar - a.kartKvar) },
-    { title: "MINST KART I KÖ",  accent: C.blue,   rows: top3(valid, (a, b) => a.kartKvar - b.kartKvar) },
-    { title: "MEST PALL I KÖ",   accent: C.yellow, rows: top3(valid, (a, b) => b.pallKvar - a.pallKvar) },
-    { title: "MINST PALL I KÖ",  accent: C.blue,   rows: top3(valid, (a, b) => a.pallKvar - b.pallKvar) },
-    { title: "MEST KOLLI I KÖ",  accent: C.yellow, rows: top3(valid, (a, b) => b.kolliKvar - a.kolliKvar) },
-    { title: "MINST KOLLI I KÖ", accent: C.blue,   rows: top3(valid, (a, b) => a.kolliKvar - b.kolliKvar) },
+    { title: "MEST KART EJ KLAR",   accent: C.yellow, rows: top3(valid, (a, b) => b.kartKvar - a.kartKvar) },
+    { title: "MINST KART EJ KLAR",  accent: C.blue,   rows: top3(valid, (a, b) => a.kartKvar - b.kartKvar) },
+    { title: "MEST PALL EJ KLAR",   accent: C.yellow, rows: top3(valid, (a, b) => b.pallKvar - a.pallKvar) },
+    { title: "MINST PALL EJ KLAR",  accent: C.blue,   rows: top3(valid, (a, b) => a.pallKvar - b.pallKvar) },
+    { title: "MEST KOLLI EJ KLAR",  accent: C.yellow, rows: top3(valid, (a, b) => b.kolliKvar - a.kolliKvar) },
+    { title: "MINST KOLLI EJ KLAR", accent: C.blue,   rows: top3(valid, (a, b) => a.kolliKvar - b.kolliKvar) },
     { title: "TOPP-PRESTATION",  accent: C.green,  rows: top3(withPr, (a, b) => b.pr - a.pr) },
     { title: "LÄGST PRESTATION", accent: C.red,    rows: top3(withPr, (a, b) => a.pr - b.pr) },
   ];
