@@ -16,6 +16,7 @@ import {
 } from "../shared/components";
 import { parseDailyRows } from "../shared/parseDailyRows";
 import { callAI } from "../shared/api";
+import { rekommenderadBemanning } from "../shared/liveUtils";
 
 function parseDailyFile(file) {
   return new Promise((resolve, reject) => {
@@ -168,6 +169,7 @@ export default function Brief() {
             <DataTable headers={[
               "BANA",
               { label: "PERS", align: "right" },
+              { label: "REK. BEM.", align: "right" },
               { label: "KOLLI", align: "right" },
               { label: "KART", align: "right" },
               { label: "PREST", align: "right" },
@@ -180,10 +182,13 @@ export default function Brief() {
                   const scanRate = r.scannat != null ? r.scannat : getScanRate(r.kbana, parsed.scanRates);
                   const scanPct = scanRate != null ? Math.round(scanRate * 100) : null;
                   const scanColor = scanPct == null ? C.dim : scanPct < 20 ? C.dim : scanPct < 60 ? C.red : scanPct < 75 ? C.yellow : C.green;
+                  const rekBem = rekommenderadBemanning(r.kbana, r.kolli, r.kart, r.helpall);
+                  const rekColor = r.pers >= rekBem ? C.green : r.pers >= rekBem * 0.9 ? C.yellow : C.red;
                   return (
                     <tr key={i}>
                       <td className="primary-cell">{r.kbana}</td>
                       <td className="is-right mono-cell" style={{ color: C.textDim }}>{r.pers}</td>
+                      <td className="is-right mono-cell" style={{ color: rekColor, fontWeight: 700 }}>{rekBem.toFixed(1)}</td>
                       <td className="is-right mono-cell">{r.kolli}</td>
                       <td className="is-right mono-cell">{r.kart}</td>
                       <td className="is-right"><PrestBar prest={r.prest} /></td>

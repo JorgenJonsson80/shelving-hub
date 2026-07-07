@@ -13,6 +13,7 @@ import {
   PrestBar,
 } from "../shared/components";
 import { parseDailyRows } from "../shared/parseDailyRows";
+import { rekommenderadBemanning } from "../shared/liveUtils";
 
 const KBANA_ORDER = ["K51","K52","K53","K55","K56","K58","K59","K60","K61-7","K61-36","K62","K63"];
 // Old localStorage key — no longer written to, only read once for the
@@ -193,6 +194,7 @@ function DagTabell({ rows }) {
     <DataTable headers={[
       "BANA",
       { label: "PERS", align: "right" },
+      { label: "REK. BEM.", align: "right" },
       { label: "KOLLI", align: "right" },
       { label: "KART", align: "right" },
       { label: "PALL", align: "right" },
@@ -206,10 +208,13 @@ function DagTabell({ rows }) {
             if (!r) return null;
             const scanPct = r.scannat != null ? Math.round(r.scannat * 100) : null;
             const scanColor = scanPct == null ? C.dim : scanPct < 20 ? C.dim : scanPct < 60 ? C.red : scanPct < 75 ? C.yellow : C.green;
+            const rekBem = rekommenderadBemanning(r.kbana, r.kolli, r.kart, r.helpall);
+            const rekColor = r.pers >= rekBem ? C.green : r.pers >= rekBem * 0.9 ? C.yellow : C.red;
             return (
               <tr key={k}>
                 <td className="primary-cell">{r.kbana}</td>
                 <td className="is-right mono-cell" style={{ color: C.textDim }}>{r.pers}</td>
+                <td className="is-right mono-cell" style={{ color: rekColor, fontWeight: 700 }}>{rekBem.toFixed(1)}</td>
                 <td className="is-right mono-cell">{r.kolli}</td>
                 <td className="is-right mono-cell">{r.kart}</td>
                 <td className="is-right mono-cell">{r.helpall}</td>
@@ -231,6 +236,8 @@ function SnitTabell({ agg }) {
     <DataTable headers={[
       "BANA",
       { label: "DAGAR", align: "right" },
+      { label: "SNITT PERS", align: "right" },
+      { label: "SNITT REK. BEM.", align: "right" },
       { label: "SNITT KOLLI", align: "right" },
       { label: "SNITT KART", align: "right" },
       { label: "SNITT PREST", align: "right" },
@@ -239,10 +246,13 @@ function SnitTabell({ agg }) {
           {KBANA_ORDER.map(k => {
             const r = agg.find(x => x.kbana === k);
             if (!r) return null;
+            const rekColor = r.pers >= r.rekBem ? C.green : r.pers >= r.rekBem * 0.9 ? C.yellow : C.red;
             return (
               <tr key={k}>
                 <td className="primary-cell">{r.kbana}</td>
                 <td className="is-right mono-cell" style={{ color: C.dim }}>{r.n}</td>
+                <td className="is-right mono-cell" style={{ color: C.textDim }}>{r.pers.toFixed(1)}</td>
+                <td className="is-right mono-cell" style={{ color: rekColor, fontWeight: 700 }}>{r.rekBem.toFixed(1)}</td>
                 <td className="is-right mono-cell">{Math.round(r.ko)}</td>
                 <td className="is-right mono-cell">{Math.round(r.ka)}</td>
                 <td className="is-right"><PrestBar prest={r.prest} /></td>
@@ -337,23 +347,31 @@ export default function Historik() {
     const byK = {};
     for (const d of Object.values(history[selMonth])) {
       for (const r of d.rows) {
-        if (!byK[r.kbana]) byK[r.kbana] = { pa: [], ga: [], ko: 0, ka: 0, n: 0 };
+        if (!byK[r.kbana]) byK[r.kbana] = { pa: [], ga: [], ko: 0, ka: 0, pall: 0, pers: 0, n: 0 };
         const b = byK[r.kbana];
         if (r.prest) b.pa.push(r.prest);
         b.ga.push(r.gap);
         b.ko += r.kolli;
         b.ka += r.kart;
+        b.pall += r.helpall || 0;
+        b.pers += r.pers || 0;
         b.n++;
       }
     }
-    return Object.entries(byK).map(([k, v]) => ({
-      kbana: k,
-      prest: v.pa.length ? v.pa.reduce((a, b) => a + b) / v.pa.length : 0,
-      gap: v.ga.reduce((a, b) => a + b) / v.ga.length,
-      ko: v.n ? v.ko / v.n : 0,
-      ka: v.n ? v.ka / v.n : 0,
-      n: v.n,
-    }));
+    return Object.entries(byK).map(([k, v]) => {
+      const ko = v.n ? v.ko / v.n : 0;
+      const ka = v.n ? v.ka / v.n : 0;
+      const pall = v.n ? v.pall / v.n : 0;
+      const pers = v.n ? v.pers / v.n : 0;
+      return {
+        kbana: k,
+        prest: v.pa.length ? v.pa.reduce((a, b) => a + b) / v.pa.length : 0,
+        gap: v.ga.reduce((a, b) => a + b) / v.ga.length,
+        ko, ka, pers,
+        rekBem: rekommenderadBemanning(k, ko, ka, pall),
+        n: v.n,
+      };
+    });
   }, [history, selMonth]);
 
   const totalDays = Object.values(history).reduce((s, m) => s + Object.keys(m).length, 0);

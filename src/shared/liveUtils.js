@@ -1,4 +1,22 @@
+import { CELL_MAP } from "./cellMap";
+
 export const defaultBastid = def => def.line.startsWith("Stn") ? 2.8 : 1.8;
+
+// Bastid lookup from just a K-bana code (no `line` info available, e.g. in
+// Historik/Brief's daily-file rows) — falls back to 1.8 (Spår) for K-banor
+// not in CELL_MAP (e.g. K63), matching defaultBastid's own default.
+export function bastidForKbana(kbana) {
+  const def = CELL_MAP.kbanor.find(kb => kb.kbana === kbana);
+  return def ? defaultBastid(def) : 1.8;
+}
+
+// Rekommenderad bemanning för en hel dags volym på en K-bana, givet en
+// standard skiftlängd (8h). arbetsminuter-formeln matchar calcWork nedan.
+export function rekommenderadBemanning(kbana, kolli, kart, helpall, shiftMins = 8 * 60) {
+  const bastid = bastidForKbana(kbana);
+  const arbetsminuter = kolli * bastid + kart * 0.6 + helpall * 12;
+  return arbetsminuter / shiftMins;
+}
 
 export function classifyLocation(loc) {
   if (!loc) return null;
