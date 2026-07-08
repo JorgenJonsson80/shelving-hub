@@ -1,11 +1,20 @@
 import { CELL_MAP } from "./cellMap";
 
+// Kalibrerad 2026-07-08 mot ~20 dagars historik + användarens egna
+// ingenjörsmål (60 kartonger/timme). Kolli-bastiderna (Spår/Golv) väntar
+// kvar på mer historik innan de omkalibreras — se minnesanteckningar.
+export const KARTONG_MIN = 1.0;
+
 export const defaultBastid = def => def.line.startsWith("Stn") ? 2.8 : 1.8;
 
 // Bastid lookup from just a K-bana code (no `line` info available, e.g. in
-// Historik/Brief's daily-file rows) — falls back to 1.8 (Spår) for K-banor
-// not in CELL_MAP (e.g. K63), matching defaultBastid's own default.
+// Historik/Brief's daily-file rows). K63 är bekräftat Golv men saknas i
+// CELL_MAP (ingen cell-koordinat-mappning finns för den i Live-flikens
+// Excel-format), så den specialhanteras här istället för att läggas in i
+// CELL_MAP med påhittade koordinater. Övriga okända K-banor faller
+// tillbaka på 1.8 (Spår), matchar defaultBastid:s eget default.
 export function bastidForKbana(kbana) {
+  if (kbana === "K63") return 2.8;
   const def = CELL_MAP.kbanor.find(kb => kb.kbana === kbana);
   return def ? defaultBastid(def) : 1.8;
 }
@@ -14,7 +23,7 @@ export function bastidForKbana(kbana) {
 // standard skiftlängd (8h). arbetsminuter-formeln matchar calcWork nedan.
 export function rekommenderadBemanning(kbana, kolli, kart, helpall, shiftMins = 8 * 60) {
   const bastid = bastidForKbana(kbana);
-  const arbetsminuter = kolli * bastid + kart * 0.6 + helpall * 12;
+  const arbetsminuter = kolli * bastid + kart * KARTONG_MIN + helpall * 12;
   return arbetsminuter / shiftMins;
 }
 
@@ -124,8 +133,8 @@ export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins
   const pafyllKlart = pafyll.klart;
   const kartKlart   = kart ? kart.klart : 0;
 
-  const remainWork = pafyllKvar * bastidMins + kartKvar * 0.6 + pallKvar * 12;
-  const doneWork   = pafyllKlart * bastidMins + kartKlart * 0.6 + pallKlart * 12;
+  const remainWork = pafyllKvar * bastidMins + kartKvar * KARTONG_MIN + pallKvar * 12;
+  const doneWork   = pafyllKlart * bastidMins + kartKlart * KARTONG_MIN + pallKlart * 12;
 
   const availMins = pers * remainH * 60;
   const buffer    = availMins - remainWork;
