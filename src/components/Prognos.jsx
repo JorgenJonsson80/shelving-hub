@@ -27,6 +27,20 @@ const KURVA = {
 const MIN_SAMPLES_VECKODAG = 5;
 const MIN_SAMPLES_POOLAD = 5;
 
+// A stored day only tells the truth about "how much of a normal day is done
+// by hour X" if the file behind it was captured near end of day. A file
+// uploaded mid-morning (from either this tab or Påfyllningsmönster, which
+// shares the same pf_days table) still gets saved under that date — its
+// "total" is just whatever had arrived by then, not the real day total.
+// Left untreated, such a day looks like "100% done by 08:00" once it becomes
+// history, which drags the learned curve's early hours up and makes later
+// forecasts (estTotal = sett / andelKlar) come out far too low. Require data
+// late in the day before trusting a stored day as a real reference point.
+const DAGEN_KOMPLETT_TIMME = 16;
+function dagenArKomplett(day) {
+  return Array.isArray(day.perTimme) && day.perTimme.slice(DAGEN_KOMPLETT_TIMME).some(v => v > 0);
+}
+
 // Builds a KURVA-shaped object from real stored days instead of the
 // hardcoded fallback. Falls back per-source (not per-curve) to KURVA's
 // values when a source has no usable data across the given days at all
@@ -143,7 +157,7 @@ export default function Prognos() {
 
   const effectiveKurva = useMemo(() => {
     const todayWd = now.getDay();
-    const history = storedDays.filter(d => d.rows?.length > 0 && d.datum !== todayData?.datum);
+    const history = storedDays.filter(d => d.rows?.length > 0 && d.datum !== todayData?.datum && dagenArKomplett(d));
     const veckodagDays = history.filter(d => new Date(d.datum + "T12:00:00").getDay() === todayWd);
 
     if (veckodagDays.length >= MIN_SAMPLES_VECKODAG) {
@@ -216,7 +230,8 @@ export default function Prognos() {
       }
     }
 
-    const daysWithRows = storedDays.filter(d => Array.isArray(d.rows) && d.rows.length > 0);
+    const daysWithRows = storedDays.filter(d =>
+      Array.isArray(d.rows) && d.rows.length > 0 && d.datum !== todayData?.datum && dagenArKomplett(d));
     if (!daysWithRows.length) return null;
 
     const todayWd = new Date().getDay();
@@ -330,7 +345,7 @@ export default function Prognos() {
 
     // Historical days matching today's weekday, excluding today's own date
     const historicalDays = storedDays
-      .filter(d => d.datum !== todayData.datum && d.rows?.length > 0)
+      .filter(d => d.datum !== todayData.datum && d.rows?.length > 0 && dagenArKomplett(d))
       .filter(d => new Date(d.datum + "T12:00:00").getDay() === todayWd)
       .map(d => perKbanaStats(d.rows));
     if (historicalDays.length < MIN_SAMPLES) return null;
