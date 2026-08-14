@@ -1,32 +1,29 @@
+import { supabase } from "./supabaseClient";
+
 const PROXY_URL = import.meta.env.VITE_API_URL;
-const APP_KEY   = import.meta.env.VITE_APP_KEY;
-const API_KEY   = import.meta.env.VITE_ANTHROPIC_API_KEY;
 
 /**
- * Call Claude.
- * - With VITE_API_URL: routes through Cloudflare Worker (API key server-side, more secure)
- * - Without: calls Anthropic directly from the browser using the required browser-access header
+ * Call the server-side AI proxy as the currently signed-in Supabase user.
+ *
+ * The browser must never have an Anthropic key or a shared proxy password.
+ * The Worker validates this session token before it calls Anthropic.
  */
 export async function callAI(messages, maxTokens = 1000) {
-  let url, headers;
+  if (!PROXY_URL) throw new Error("AI-tjänsten är inte konfigurerad.");
 
-  if (PROXY_URL) {
-    url = PROXY_URL;
-    headers = { "Content-Type": "application/json", "X-App-Key": APP_KEY };
-  } else {
-    url = "https://api.anthropic.com/v1/messages";
-    headers = {
-      "Content-Type": "application/json",
-      "x-api-key": API_KEY,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    };
-  }
+  const { data: sessionData, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  if (!sessionData.session?.access_token) throw new Error("Du måste vara inloggad för att använda AI-briefen.");
 
-  const resp = await fetch(url, {
+  const resp = await fetch(PROXY_URL, {
     method: "POST",
-    headers,
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: maxTokens, messages }),
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${sessionData.session.access_token}`,
+    },
+    // Model and upper limit are enforced again by the Worker; this only
+    // communicates the requested size to the trusted server.
+    body: JSON.stringify({ max_tokens: maxTokens, messages }),
   });
 
   if (!resp.ok) {

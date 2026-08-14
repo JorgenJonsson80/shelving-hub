@@ -1,0 +1,13 @@
+name = "shelving-hub-ai"
+main = "index.js"
+compatibility_date = "2026-08-14"
+
+# Choose an unused positive integer for namespace_id in this Cloudflare account.
+# The 6 requests/minute limit is per verified user and Cloudflare location.
+[[ratelimits]]
+name = "AI_RATE_LIMITER"
+namespace_id = "61001"
+
+  [ratelimits.simple]
+  limit = 6
+  period = 60

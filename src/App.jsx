@@ -1,14 +1,17 @@
-import { useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import { supabase } from "./shared/supabaseClient";
 import Login from "./shared/Login";
-import Live from "./components/Live";
-import Bemanning from "./components/Bemanning";
-import Brief from "./components/Brief";
-import Raknare from "./components/Raknare";
-import Historik from "./components/Historik";
-import Prognos from "./components/Prognos";
-import Pafyllningsmonster from "./components/Pafyllningsmonster";
-import Ledtid from "./components/Ledtid";
+
+// Each dashboard is a separate chunk. A tab is only downloaded once a user
+// visits it, then kept mounted so importing a file is not lost when switching.
+const Live = lazy(() => import("./components/Live"));
+const Bemanning = lazy(() => import("./components/Bemanning"));
+const Brief = lazy(() => import("./components/Brief"));
+const Raknare = lazy(() => import("./components/Raknare"));
+const Historik = lazy(() => import("./components/Historik"));
+const Prognos = lazy(() => import("./components/Prognos"));
+const Pafyllningsmonster = lazy(() => import("./components/Pafyllningsmonster"));
+const Ledtid = lazy(() => import("./components/Ledtid"));
 
 const TABS = [
   { id: "live",       label: "Live",            Component: Live,             dot: true },
@@ -23,7 +26,13 @@ const TABS = [
 
 export default function App() {
   const [tab, setTab] = useState("live");
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set(["live"]));
   const [session, setSession] = useState(undefined); // undefined = still checking, null = logged out
+
+  const selectTab = (id) => {
+    setTab(id);
+    setVisitedTabs(current => current.has(id) ? current : new Set([...current, id]));
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -50,7 +59,7 @@ export default function App() {
             return (
               <button
                 key={t.id}
-                onClick={() => setTab(t.id)}
+                onClick={() => selectTab(t.id)}
                 className={"tab-button" + (active ? " is-active" : "")}
               >
                 {t.dot && <span className="live-dot" />}
@@ -66,11 +75,13 @@ export default function App() {
       </div>
 
       <div className="app-main">
-        {TABS.map(({ id, Component }) => (
-          <div key={id} style={tab === id ? undefined : { display: "none" }}>
-            <Component />
-          </div>
-        ))}
+        <Suspense fallback={<div className="dashboard-page">Laddar vy…</div>}>
+          {TABS.filter(({ id }) => visitedTabs.has(id)).map(({ id, Component }) => (
+            <div key={id} style={tab === id ? undefined : { display: "none" }}>
+              <Component />
+            </div>
+          ))}
+        </Suspense>
       </div>
     </div>
   );
