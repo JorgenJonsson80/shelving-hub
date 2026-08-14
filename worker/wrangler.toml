@@ -1,6 +1,9 @@
 name = "shelving-hub-ai"
 main = "index.js"
 compatibility_date = "2026-08-14"
+# The Worker variables are configured in Cloudflare. Preserve them on every
+# CI deploy so a code release cannot silently erase its auth configuration.
+keep_vars = true
 
 # Choose an unused positive integer for namespace_id in this Cloudflare account.
 # The 6 requests/minute limit is per verified user and Cloudflare location.

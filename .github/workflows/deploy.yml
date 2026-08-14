@@ -12,7 +12,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  deploy-worker:
+    runs-on: ubuntu-latest
+    outputs:
+      worker_url: ${{ steps.deploy-worker.outputs.deployment-url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy authenticated AI Worker
+        id: deploy-worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          command: deploy
+      - name: Verify Worker auth configuration
+        env:
+          WORKER_URL: ${{ steps.deploy-worker.outputs.deployment-url }}
+        run: |
+          test -n "$WORKER_URL"
+          status=$(curl --silent --show-error --output /dev/null --write-out "%{http_code}" \
+            --request POST \
+            --header "Origin: https://jorgenjonsson80.github.io" \
+            --header "Content-Type: application/json" \
+            --data '{"messages":[{"role":"user","content":"health check"}]}' \
+            "$WORKER_URL")
+          test "$status" = "401"
+
+  deploy-pages:
+    needs: deploy-worker
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +51,7 @@ jobs:
       - run: npm ci
       - run: npm run build
         env:
-          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_API_URL: ${{ needs.deploy-worker.outputs.worker_url }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       - uses: peaceiris/actions-gh-pages@v4
