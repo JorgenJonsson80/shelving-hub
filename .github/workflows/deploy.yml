@@ -24,6 +24,9 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Rate Limiting bindings require Wrangler 4.36+. The action's
+          # fallback currently installs Wrangler 3 unless this is explicit.
+          wranglerVersion: "4.123.0"
           workingDirectory: worker
           command: deploy
       - name: Verify Worker auth configuration
