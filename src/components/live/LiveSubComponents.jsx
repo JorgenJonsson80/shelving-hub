@@ -1,7 +1,7 @@
 import { C } from "../../shared/theme";
 import { Panel } from "../../shared/components";
 import {
-  calcWork, getShiftBounds, getWorkerStatus, fmtMins,
+  calcWork, getShiftBounds, getWorkerStatus, fmtMins, fmtClock,
 } from "../../shared/liveUtils";
 
 export function FlowBar({ iko, pavag, klart, total }) {
@@ -53,7 +53,7 @@ export function AheadBehindPill({ flow, sched, nowMins }) {
   );
 }
 
-export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins }) {
+export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, normal }) {
   const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins);
   if (!w) return null;
 
@@ -63,6 +63,22 @@ export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMi
     : w.efficiency >= 90 ? C.green
     : w.efficiency >= 70 ? C.yellow
     : C.red;
+  const tempoLabel = w.efficiency == null ? null
+    : w.efficiency >= 90 ? "högt tempo"
+    : w.efficiency >= 70 ? "normalt tempo"
+    : "lågt tempo";
+
+  // Projected finish time if the lane keeps its current pace: rate is
+  // work-minutes cleared per real minute, derived the same way as
+  // `efficiency` above (doneWork / spentMins), just applied forward instead
+  // of backward. Falls back to the assumed 100% rate until there's enough
+  // elapsed time to measure an actual one.
+  const rate = pers * ((w.efficiency ?? 100) / 100);
+  const etaMins = w.remainWork > 0 && rate > 0 ? nowMins + w.remainWork / rate : null;
+  const etaLate = etaMins != null && w.endMins != null && etaMins > w.endMins;
+
+  const normalTotal = normal ? Math.round(normal.kolli) : null;
+  const todayTotal = pafyll?.total ?? 0;
 
   return (
     <div className="work-calc">
@@ -80,7 +96,23 @@ export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMi
         <div className="work-calc__item">
           <span className="work-calc__lbl">Effektivitet</span>
           <span className="work-calc__val" style={{ color: effColor }}>
-            {Math.round(w.efficiency)}%
+            {Math.round(w.efficiency)}% · {tempoLabel}
+          </span>
+        </div>
+      )}
+      {etaMins != null && (
+        <div className="work-calc__item">
+          <span className="work-calc__lbl">Klart vid nuv. takt</span>
+          <span className="work-calc__val" style={{ color: etaLate ? C.red : C.green }}>
+            {fmtClock(etaMins)}{etaLate ? " (sent)" : ""}
+          </span>
+        </div>
+      )}
+      {normalTotal != null && (
+        <div className="work-calc__item" title={`Snitt av ${normal.n} tidigare dagar${normal.tier === "veckodag" ? " (samma veckodag)" : ""}`}>
+          <span className="work-calc__lbl">Normalt idag</span>
+          <span className="work-calc__val" style={{ color: todayTotal > normalTotal ? C.yellow : "var(--dim)" }}>
+            ~{normalTotal}st {todayTotal > normalTotal ? "(över snitt)" : ""}
           </span>
         </div>
       )}

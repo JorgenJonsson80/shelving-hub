@@ -4,6 +4,7 @@ import { ActionButton, Alert, Dropzone, PageHeader, Panel } from "../shared/comp
 import { defaultBastid, normKbana, getWorkerStatus, calcLaneMetrics } from "../shared/liveUtils";
 import { parseLive, parseStaffingFile } from "../shared/parsers";
 import { useSetting } from "../shared/useSetting";
+import { fetchHistorikDays, buildKbanaNormals } from "../shared/kbanaNormals";
 import {
   FlowBar, StatusPill, AheadBehindPill, WorkCalc, ScheduleOverview, PassSettings, Topp3Panel,
 } from "./live/LiveSubComponents";
@@ -146,13 +147,19 @@ export default function Live() {
   const [bastidPerK,      setBastidPerK]      = useSetting("live_bastid", {});
   const [passes,          setPasses]          = useSetting("live_passes", DEFAULT_PASSES);
   const [now,             setNow]             = useState(() => new Date());
+  const [historikDays,    setHistorikDays]    = useState([]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    fetchHistorikDays().then(setHistorikDays).catch(() => {});
+  }, []);
+
   const nowMins = now.getHours() * 60 + now.getMinutes();
+  const kbanaNormals = useMemo(() => buildKbanaNormals(historikDays, now.getDay()), [historikDays, now]);
 
   const getBastid = (kb) => bastidPerK[kb.kbana] ?? defaultBastid(kb);
 
@@ -579,6 +586,7 @@ export default function Live() {
                         pafyll={kb.pafyll} kart={kb.kart}
                         pallKvar={pallKvar} pallKlart={pallKlart}
                         pers={pers} sched={sched} nowMins={nowMins} bastidMins={bastid}
+                        normal={kbanaNormals[kb.kbana]}
                       />
                     )}
 

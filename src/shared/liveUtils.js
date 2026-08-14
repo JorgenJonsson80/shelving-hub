@@ -142,13 +142,23 @@ export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins
   const spentMins = elapsedH * 60 * pers;
   const efficiency = spentMins > 3 ? (doneWork / spentMins) * 100 : null;
 
-  return { remainWork, doneWork, availMins, buffer, efficiency, remainH, elapsedH };
+  return { remainWork, doneWork, availMins, buffer, efficiency, remainH, elapsedH, endMins: bounds.endMins };
 }
 
 export function fmtMins(mins) {
   const h = Math.floor(Math.abs(mins) / 60);
   const m = Math.round(Math.abs(mins) % 60);
   return h > 0 ? `${h}h ${m}min` : `${m}min`;
+}
+
+// Clock-time formatting for an absolute minutes-since-midnight value that may
+// roll past 24h (e.g. an ETA computed from a large remaining workload).
+export function fmtClock(mins) {
+  const rolled = mins >= 1440;
+  const m = ((mins % 1440) + 1440) % 1440;
+  const h = Math.floor(m / 60);
+  const mm = Math.round(m % 60);
+  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}${rolled ? " (+1d)" : ""}`;
 }
 
 export function calcLaneMetrics(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins) {
