@@ -1,88 +1,19 @@
 import { useState, useEffect, useMemo } from "react";
 import { C } from "../shared/theme";
-import { Alert, Dropzone, Panel } from "../shared/components";
+import { Alert, DeltaChip, Dropzone, Panel } from "../shared/components";
 import { parsePFExport } from "../shared/parsers";
 import { classifyLocation } from "../shared/liveUtils";
 import { fetchPfDays, upsertPfDay } from "../shared/pfDaysDb";
+import { fetchLedtidObservations } from "../shared/ledtidDb";
+import {
+  KURVA, MIN_SAMPLES_VECKODAG, MIN_SAMPLES_POOLAD, MIN_SAMPLES_MANAD,
+  dagenArKomplett, buildEmpiriskKurva, getAndelKlar, calcPrognos,
+} from "../shared/prognosCurve";
 
 function toMin(str) {
   if (!str) return null;
   const [h, m] = String(str).split(":").map(Number);
   return isNaN(h) ? null : h * 60 + (m || 0);
-}
-
-// Fallback empirical cumulative curve — 9 days of data (5–25 Jun 2026, 15 033
-// rows), used only when there isn't enough stored history yet to build one
-// from real data (see buildEmpiriskKurva / effectiveKurva below).
-// Index 0 = pct done by end of hour 5, index 11 = end of hour 16
-const KURVA = {
-  timmar: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-  GM:    [ 0,  2, 14, 27, 44, 55, 63, 74, 81, 91, 97, 98],
-  Mezz:  [11, 16, 29, 42, 44, 55, 69, 80, 87, 96, 98, 99],
-  ULC:   [ 7, 14, 28, 45, 46, 57, 71, 83, 90, 98, 99,100],
-  PL09:  [ 9, 16, 28, 45, 48, 59, 72, 81, 88, 96, 99, 99],
-  TOTAL: [ 3,  7, 19, 33, 44, 56, 66, 77, 84, 93, 97, 99],
-};
-
-const MIN_SAMPLES_VECKODAG = 5;
-const MIN_SAMPLES_POOLAD = 5;
-
-// A stored day only tells the truth about "how much of a normal day is done
-// by hour X" if the file behind it was captured near end of day. A file
-// uploaded mid-morning (from either this tab or Påfyllningsmönster, which
-// shares the same pf_days table) still gets saved under that date — its
-// "total" is just whatever had arrived by then, not the real day total.
-// Left untreated, such a day looks like "100% done by 08:00" once it becomes
-// history, which drags the learned curve's early hours up and makes later
-// forecasts (estTotal = sett / andelKlar) come out far too low. Require data
-// late in the day before trusting a stored day as a real reference point.
-const DAGEN_KOMPLETT_TIMME = 16;
-function dagenArKomplett(day) {
-  return Array.isArray(day.perTimme) && day.perTimme.slice(DAGEN_KOMPLETT_TIMME).some(v => v > 0);
-}
-
-// Builds a KURVA-shaped object from real stored days instead of the
-// hardcoded fallback. Falls back per-source (not per-curve) to KURVA's
-// values when a source has no usable data across the given days at all
-// (e.g. a day where PL09 was 0) — keeps the rest of the curve real.
-function buildEmpiriskKurva(days) {
-  const timmar = KURVA.timmar;
-  const sources = ["GM", "Mezz", "ULC", "PL09", "TOTAL"];
-  const out = { timmar };
-  for (const src of sources) {
-    const perBucket = timmar.map(() => []);
-    for (const day of days) {
-      const total  = src === "TOTAL" ? day.total   : day.perKalla?.[src];
-      const hourly = src === "TOTAL" ? day.perTimme : day.perTimmeKalla?.[src];
-      if (!total || !hourly) continue;
-      let cum = 0;
-      const cumByHour = hourly.map(v => (cum += v));
-      timmar.forEach((h, i) => perBucket[i].push((cumByHour[h] / total) * 100));
-    }
-    out[src] = perBucket.map((arr, i) =>
-      arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : KURVA[src][i]
-    );
-  }
-  return out;
-}
-
-function getAndelKlar(kurva, kalla, nowHour) {
-  const idx = kurva.timmar.findIndex(h => h >= nowHour);
-  if (idx === -1) return 1.0;
-  return (kurva[kalla]?.[idx] ?? 100) / 100;
-}
-
-function calcPrognos(kurva, kalla, sett, nowHour) {
-  const andelKlar = getAndelKlar(kurva, kalla, nowHour);
-  if (andelKlar <= 0) return { estTotal: null, kvar: null, osäkert: true, andelKlar: 0 };
-  const estTotal = sett / andelKlar;
-  const kvar = Math.max(0, estTotal - sett);
-  return { estTotal: Math.round(estTotal), kvar: Math.round(kvar), andelKlar };
-}
-
-function lsGet(key, fallback) {
-  try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback; }
-  catch { return fallback; }
 }
 
 const VECKODAGAR = ["Sön","Mån","Tis","Ons","Tor","Fre","Lör"];
@@ -143,6 +74,7 @@ export default function Prognos() {
   const [now, setNow]               = useState(() => new Date());
   const [storedDays, setStoredDays] = useState([]);
   const [filterVeckodag, setFilterVeckodag] = useState(false);
+  const [ledtidObs, setLedtidObs]   = useState([]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
@@ -153,7 +85,12 @@ export default function Prognos() {
     fetchPfDays().then(setStoredDays).catch(e => setErr(e.message));
   }, []);
 
+  useEffect(() => {
+    fetchLedtidObservations().then(setLedtidObs).catch(() => {});
+  }, []);
+
   const nowHour = now.getHours();
+  const nowT = nowHour + now.getMinutes() / 60;
 
   const effectiveKurva = useMemo(() => {
     const todayWd = now.getDay();
@@ -189,14 +126,14 @@ export default function Prognos() {
     const { perKalla, total, perTimme } = todayData;
     const kurva = effectiveKurva.kurva;
 
-    const totalProg = calcPrognos(kurva, "TOTAL", total, nowHour);
-    const andelKlarTotal = getAndelKlar(kurva, "TOTAL", nowHour);
+    const totalProg = calcPrognos(kurva, "TOTAL", total, nowT);
+    const andelKlarTotal = getAndelKlar(kurva, "TOTAL", nowT);
     const klartPct = Math.round(andelKlarTotal * 100);
 
-    const gmProg   = calcPrognos(kurva, "GM",   perKalla.GM,   nowHour);
-    const mezzProg = calcPrognos(kurva, "Mezz", perKalla.Mezz, nowHour);
-    const ulcProg  = calcPrognos(kurva, "ULC",  perKalla.ULC,  nowHour);
-    const pl09Prog = calcPrognos(kurva, "PL09", perKalla.PL09, nowHour);
+    const gmProg   = calcPrognos(kurva, "GM",   perKalla.GM,   nowT);
+    const mezzProg = calcPrognos(kurva, "Mezz", perKalla.Mezz, nowT);
+    const ulcProg  = calcPrognos(kurva, "ULC",  perKalla.ULC,  nowT);
+    const pl09Prog = calcPrognos(kurva, "PL09", perKalla.PL09, nowT);
 
     const gmLåg = gmProg.kvar != null ? Math.round(gmProg.kvar * 0.75) : null;
     const gmHög = gmProg.kvar != null ? Math.round(gmProg.kvar * 1.25) : null;
@@ -216,7 +153,7 @@ export default function Prognos() {
       tooEarly, morningWarn,
       kurvaTier: effectiveKurva.tier, kurvaN: effectiveKurva.n,
     };
-  }, [todayData, nowHour, effectiveKurva]);
+  }, [todayData, nowT, nowHour, effectiveKurva]);
 
   const kbanaForecast = useMemo(() => {
     if (!forecast || forecast.tooEarly) return null;
@@ -239,6 +176,32 @@ export default function Prognos() {
       ? daysWithRows.filter(d => new Date(d.datum + "T12:00:00").getDay() === todayWd)
       : daysWithRows;
     if (!days.length) return null;
+
+    // This-month average PF/day per K-bana (excluding today), for the "vs
+    // snitt" comparison shown next to each K-bana's estimated total. Kept
+    // separate from `days` above (which may be weekday-filtered) — this is
+    // always the plain calendar-month average, matching Historik's
+    // "månadssnitt" so the two features read consistently.
+    const yearMonth = todayData.datum.slice(0, 7);
+    const monthDays = storedDays.filter(d =>
+      Array.isArray(d.rows) && d.rows.length > 0 && d.datum !== todayData.datum &&
+      d.datum?.startsWith(yearMonth) && dagenArKomplett(d));
+    const monthSum = {}, monthCount = {};
+    for (const day of monthDays) {
+      const dayKb = {};
+      for (const row of day.rows) {
+        const kb = classifyLocation(row.toLoc);
+        if (kb) dayKb[kb] = (dayKb[kb] || 0) + 1;
+      }
+      for (const [kb, n] of Object.entries(dayKb)) {
+        monthSum[kb] = (monthSum[kb] || 0) + n;
+        monthCount[kb] = (monthCount[kb] || 0) + 1;
+      }
+    }
+    const monthAvgByKb = {};
+    for (const kb of Object.keys(monthSum)) {
+      if (monthCount[kb] >= MIN_SAMPLES_MANAD) monthAvgByKb[kb] = monthSum[kb] / monthCount[kb];
+    }
 
     // Aggregate per K-bana across historical days
     const hist = {};       // kb → { pf, src, pt:[24] }
@@ -270,8 +233,7 @@ export default function Prognos() {
       PL09: forecast.pl09.kvar ?? 0,
     };
 
-    // Median lead time per K-bana from ledtid_obs_v1
-    const ledtidObs = lsGet("ledtid_obs_v1", []);
+    // Median lead time per K-bana from real Ledtid.jsx observations (Supabase)
     const ledtidKb = {};
     for (const kb of Object.keys(hist)) {
       const times = ledtidObs
@@ -304,11 +266,14 @@ export default function Prognos() {
 
       const topp = timme.indexOf(Math.max(...timme));
       const today = todayKbMap[kb] || 0;
-      result.push({ kb, exp: Math.round(exp), timme, topp, ledtidMins: ledtidKb[kb] || 0, today, estTotal: today + Math.round(exp) });
+      const estTotal = today + Math.round(exp);
+      const monthAvg = monthAvgByKb[kb] ?? null;
+      const vsMonthAvg = monthAvg ? Math.round(((estTotal - monthAvg) / monthAvg) * 100) : null;
+      result.push({ kb, exp: Math.round(exp), timme, topp, ledtidMins: ledtidKb[kb] || 0, today, estTotal, monthAvg, vsMonthAvg });
     }
 
     return result.sort((a, b) => b.estTotal - a.estTotal);
-  }, [forecast, nowHour, filterVeckodag, todayData, storedDays]);
+  }, [forecast, nowHour, filterVeckodag, todayData, storedDays, ledtidObs]);
 
   const multiFill = useMemo(() => {
     if (!todayData?.rows) return null;
@@ -552,6 +517,9 @@ export default function Prognos() {
                       <span style={{ fontWeight: 700, color: C.accent, fontVariantNumeric: "tabular-nums" }}>
                         ~{k.estTotal > 0 ? k.estTotal : k.exp} tot
                       </span>
+                      {k.monthAvg != null && (
+                        <DeltaChip pct={k.vsMonthAvg} label={`vs snitt ${Math.round(k.monthAvg)}`} />
+                      )}
                     </div>
                   </div>
                   <HourBar perTimme={k.timme} highlight={k.timme[k.topp] > 0 ? [k.topp, k.topp] : null} />

@@ -1,8 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { C } from "../shared/theme";
-import { supabase } from "../shared/supabaseClient";
 import { Alert, Panel, ActionButton } from "../shared/components";
+import { fetchLedtidObservations, insertLedtidObservation, deleteLedtidObservation } from "../shared/ledtidDb";
 
 const KBANOR = ["K51", "K52", "K53", "K55", "K56", "K58", "K59", "K60", "K61-7", "K61-36", "K62"];
 const ORSAKER = ["", "Ko vid mezz", "Stor korning", "Utrustning", "Fel varutyp", "Personalbrist", "Annat"];
@@ -13,57 +13,6 @@ const LEGACY_STORAGE_KEY = "ledtid_obs_v1";
 function loadLegacyLocalObs() {
   try { return JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) ?? "null") ?? []; }
   catch { return []; }
-}
-
-function rowToObs(row) {
-  return {
-    id: row.id,
-    datum: row.datum,
-    veckodag: row.veckodag,
-    timme: row.timme,
-    kbana: row.kbana,
-    systemtid: row.systemtid,
-    skickad: row.skickad,
-    klar: row.klar,
-    transportTid: row.transport_tid,
-    mezzVantetid: row.mezz_vantetid,
-    totalLedtid: row.total_ledtid,
-    ledtid: row.transport_tid, // was a stored duplicate of transportTid — now just aliased on read
-    antalKolli: row.antal_kolli,
-    orsak: row.orsak,
-    notering: row.notering,
-  };
-}
-
-async function fetchObs() {
-  const { data, error } = await supabase.from("ledtid_observations").select("*").order("datum");
-  if (error) throw error;
-  return data.map(rowToObs);
-}
-
-async function insertObs(o) {
-  const { data, error } = await supabase.from("ledtid_observations").insert({
-    datum: o.datum,
-    veckodag: o.veckodag,
-    timme: o.timme,
-    kbana: o.kbana,
-    systemtid: o.systemtid,
-    skickad: o.skickad,
-    klar: o.klar,
-    transport_tid: o.transportTid,
-    mezz_vantetid: o.mezzVantetid,
-    total_ledtid: o.totalLedtid,
-    antal_kolli: o.antalKolli,
-    orsak: o.orsak,
-    notering: o.notering,
-  }).select().single();
-  if (error) throw error;
-  return rowToObs(data);
-}
-
-async function deleteObsRow(id) {
-  const { error } = await supabase.from("ledtid_observations").delete().eq("id", id);
-  if (error) throw error;
 }
 
 function toMinsPF(str) {
@@ -156,7 +105,7 @@ export default function Ledtid() {
   const fileRef = useRef();
 
   useEffect(() => {
-    fetchObs().then(setObs).catch(err => setImportErr("Kunde inte läsa observationer: " + err.message));
+    fetchLedtidObservations().then(setObs).catch(err => setImportErr("Kunde inte läsa observationer: " + err.message));
   }, []);
 
   const handleAdd = async () => {
@@ -184,7 +133,7 @@ export default function Ledtid() {
       notering: form.notering || null,
     };
     try {
-      const saved = await insertObs(nyObs);
+      const saved = await insertLedtidObservation(nyObs);
       setObs(prev => [...prev, saved]);
       setForm(prev => ({ ...EMPTY_FORM, kbana: prev.kbana }));
     } catch (err) {
@@ -194,7 +143,7 @@ export default function Ledtid() {
 
   const handleDelete = async (id) => {
     try {
-      await deleteObsRow(id);
+      await deleteLedtidObservation(id);
       setObs(prev => prev.filter(o => o.id !== id));
     } catch (err) {
       setImportErr("Kunde inte ta bort: " + err.message);
@@ -226,7 +175,7 @@ export default function Ledtid() {
     let ok = 0, fail = 0;
     const saved = [];
     for (const o of nya) {
-      try { saved.push(await insertObs(o)); ok++; }
+      try { saved.push(await insertLedtidObservation(o)); ok++; }
       catch { fail++; }
     }
     setObs(prev => [...prev, ...saved]);

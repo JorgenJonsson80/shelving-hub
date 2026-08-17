@@ -6,6 +6,7 @@ import {
   ActionButton,
   BedomingPill,
   DataTable,
+  DeltaChip,
   GapChip,
   MetricCard,
   MetricGrid,
@@ -74,6 +75,49 @@ function getLatestSelection(h) {
   const month = months[months.length - 1];
   const days = Object.keys(h[month]).sort();
   return { month, day: days[days.length - 1] || null };
+}
+
+// "YYYY-MM" shifted by `delta` calendar months (delta may be negative).
+function shiftMonthKey(monthKey, delta) {
+  const [y, m] = monthKey.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+}
+
+// Per-K-bana averages (kolli/kart/pall/pers/prest/gap) across a list of day
+// objects ({ rows: [...] }). Shared by the current-month, previous-month and
+// all-time aggregations in Historik so the three stay in sync.
+function aggregateKbanaRows(days) {
+  const byK = {};
+  for (const d of days) {
+    for (const r of d.rows) {
+      if (!byK[r.kbana]) byK[r.kbana] = { pa: [], ga: [], ko: 0, ka: 0, pall: 0, pers: 0, n: 0 };
+      const b = byK[r.kbana];
+      if (r.prest) b.pa.push(r.prest);
+      b.ga.push(r.gap);
+      b.ko += r.kolli;
+      b.ka += r.kart;
+      b.pall += r.helpall || 0;
+      b.pers += r.pers || 0;
+      b.n++;
+    }
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(byK)) {
+    const ko = v.n ? v.ko / v.n : 0;
+    const ka = v.n ? v.ka / v.n : 0;
+    const pall = v.n ? v.pall / v.n : 0;
+    const pers = v.n ? v.pers / v.n : 0;
+    out[k] = {
+      kbana: k,
+      prest: v.pa.length ? v.pa.reduce((a, b) => a + b) / v.pa.length : 0,
+      gap: v.ga.reduce((a, b) => a + b) / v.ga.length,
+      ko, ka, pall, pers,
+      rekBem: rekommenderadBemanning(k, ko, ka, pall),
+      n: v.n,
+    };
+  }
+  return out;
 }
 
 function parseDailyFile(file) {
@@ -231,7 +275,27 @@ function DagTabell({ rows }) {
   );
 }
 
-function SnitTabell({ agg }) {
+// Value + small "vs föregående månad / vs totalt" delta chips underneath —
+// used for the volume columns (KOLLI/KART/PALL) where a bare average hides
+// whether today's month is unusually high or low.
+function SnitCell({ value, prevVal, totalVal, prevLabel }) {
+  const pctVs = (base) => (base != null && base > 0) ? ((value - base) / base) * 100 : null;
+  const pctPrev = pctVs(prevVal);
+  const pctTotal = pctVs(totalVal);
+  return (
+    <td className="is-right mono-cell">
+      <div>{Math.round(value)}</div>
+      {(pctPrev != null || pctTotal != null) && (
+        <div style={{ display: "flex", gap: 4, justifyContent: "flex-end", marginTop: 3, flexWrap: "wrap" }}>
+          {pctPrev != null && <DeltaChip pct={pctPrev} label={`vs ${prevLabel}`} />}
+          {pctTotal != null && <DeltaChip pct={pctTotal} label="vs totalt" />}
+        </div>
+      )}
+    </td>
+  );
+}
+
+function SnitTabell({ agg, prevAgg, prevLabel, totalAgg }) {
   return (
     <DataTable headers={[
       "BANA",
@@ -240,12 +304,15 @@ function SnitTabell({ agg }) {
       { label: "SNITT REK. BEM.", align: "right" },
       { label: "SNITT KOLLI", align: "right" },
       { label: "SNITT KART", align: "right" },
+      { label: "SNITT PALL", align: "right" },
       { label: "SNITT PREST", align: "right" },
       { label: "SNITT GAP", align: "right" },
     ]}>
           {KBANA_ORDER.map(k => {
-            const r = agg.find(x => x.kbana === k);
+            const r = agg[k];
             if (!r) return null;
+            const prev = prevAgg?.[k];
+            const tot = totalAgg?.[k];
             const rekColor = r.pers >= r.rekBem ? C.green : r.pers >= r.rekBem * 0.9 ? C.yellow : C.red;
             return (
               <tr key={k}>
@@ -253,8 +320,9 @@ function SnitTabell({ agg }) {
                 <td className="is-right mono-cell" style={{ color: C.dim }}>{r.n}</td>
                 <td className="is-right mono-cell" style={{ color: C.textDim }}>{r.pers.toFixed(1)}</td>
                 <td className="is-right mono-cell" style={{ color: rekColor, fontWeight: 700 }}>{r.rekBem.toFixed(1)}</td>
-                <td className="is-right mono-cell">{Math.round(r.ko)}</td>
-                <td className="is-right mono-cell">{Math.round(r.ka)}</td>
+                <SnitCell value={r.ko}   prevVal={prev?.ko}   totalVal={tot?.ko}   prevLabel={prevLabel} />
+                <SnitCell value={r.ka}   prevVal={prev?.ka}   totalVal={tot?.ka}   prevLabel={prevLabel} />
+                <SnitCell value={r.pall} prevVal={prev?.pall} totalVal={tot?.pall} prevLabel={prevLabel} />
                 <td className="is-right"><PrestBar prest={r.prest} /></td>
                 <td className="is-right"><GapChip gap={r.gap} /></td>
               </tr>
@@ -344,35 +412,28 @@ export default function Historik() {
 
   const monthAgg = useMemo(() => {
     if (!selMonth || !history[selMonth]) return null;
-    const byK = {};
-    for (const d of Object.values(history[selMonth])) {
-      for (const r of d.rows) {
-        if (!byK[r.kbana]) byK[r.kbana] = { pa: [], ga: [], ko: 0, ka: 0, pall: 0, pers: 0, n: 0 };
-        const b = byK[r.kbana];
-        if (r.prest) b.pa.push(r.prest);
-        b.ga.push(r.gap);
-        b.ko += r.kolli;
-        b.ka += r.kart;
-        b.pall += r.helpall || 0;
-        b.pers += r.pers || 0;
-        b.n++;
-      }
-    }
-    return Object.entries(byK).map(([k, v]) => {
-      const ko = v.n ? v.ko / v.n : 0;
-      const ka = v.n ? v.ka / v.n : 0;
-      const pall = v.n ? v.pall / v.n : 0;
-      const pers = v.n ? v.pers / v.n : 0;
-      return {
-        kbana: k,
-        prest: v.pa.length ? v.pa.reduce((a, b) => a + b) / v.pa.length : 0,
-        gap: v.ga.reduce((a, b) => a + b) / v.ga.length,
-        ko, ka, pers,
-        rekBem: rekommenderadBemanning(k, ko, ka, pall),
-        n: v.n,
-      };
-    });
+    return aggregateKbanaRows(Object.values(history[selMonth]));
   }, [history, selMonth]);
+
+  // Calendar month immediately before selMonth — used for the "vs föregående
+  // månad" comparison. Always relative to whichever month is selected (not
+  // hardcoded to "this real-world month"), so browsing older months still
+  // gives a meaningful comparison.
+  const prevMonthKey = useMemo(() => selMonth ? shiftMonthKey(selMonth, -1) : null, [selMonth]);
+
+  const prevMonthAgg = useMemo(() => {
+    if (!prevMonthKey || !history[prevMonthKey]) return null;
+    return aggregateKbanaRows(Object.values(history[prevMonthKey]));
+  }, [history, prevMonthKey]);
+
+  const prevMonthLabel = prevMonthKey ? MONTHS_SHORT[parseInt(prevMonthKey.split("-")[1], 10) - 1] : "";
+
+  // All-time average across every stored day, in every month — the
+  // "totalsnitt" baseline.
+  const totalAgg = useMemo(() => {
+    const allDays = Object.values(history).flatMap(m => Object.values(m));
+    return allDays.length ? aggregateKbanaRows(allDays) : null;
+  }, [history]);
 
   const totalDays = Object.values(history).reduce((s, m) => s + Object.keys(m).length, 0);
 
@@ -521,7 +582,7 @@ export default function Historik() {
 
                 {view === "snitt" && monthAgg && (
                   <Panel key="snitt" title={"MÅNADSSNITT — " + fmtMonth(selMonth) + " (" + monthDays.length + " dagar)"} accent="blue" flush>
-                    <SnitTabell agg={monthAgg} />
+                    <SnitTabell agg={monthAgg} prevAgg={prevMonthAgg} prevLabel={prevMonthLabel} totalAgg={totalAgg} />
                   </Panel>
                 )}
 

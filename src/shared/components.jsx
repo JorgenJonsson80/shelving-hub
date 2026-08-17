@@ -130,6 +130,22 @@ export function GapChip({ gap }) {
   );
 }
 
+// Small "+X%"/"−X%" chip comparing a value against a baseline (month avg,
+// normal day, etc). Colored by magnitude, not direction — being above or
+// below a baseline isn't inherently good or bad on its own, that framing is
+// left to the caller (e.g. Live's capacity-risk chip adds its own wording).
+export function DeltaChip({ pct, label }) {
+  if (pct == null || !Number.isFinite(pct)) return null;
+  const abs = Math.abs(pct);
+  const color = abs >= 15 ? C.yellow : C.dim;
+  const weight = abs >= 30 ? 700 : 400;
+  return (
+    <span className="chip" style={{ color, background: color + "18", border: "1px solid " + color + "44", fontWeight: weight }}>
+      {pct > 0 ? "+" : ""}{Math.round(pct)}%{label ? ` ${label}` : ""}
+    </span>
+  );
+}
+
 export function BedomingPill({ text }) {
   if (!text) return null;
   const color =

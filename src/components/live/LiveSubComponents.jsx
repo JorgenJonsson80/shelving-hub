@@ -1,5 +1,5 @@
 import { C } from "../../shared/theme";
-import { Panel } from "../../shared/components";
+import { DeltaChip, Panel } from "../../shared/components";
 import {
   calcWork, getShiftBounds, getWorkerStatus, fmtMins, fmtClock,
 } from "../../shared/liveUtils";
@@ -79,6 +79,7 @@ export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMi
 
   const normalTotal = normal ? Math.round(normal.kolli) : null;
   const todayTotal = pafyll?.total ?? 0;
+  const normalPct = normalTotal ? ((todayTotal - normalTotal) / normalTotal) * 100 : null;
 
   return (
     <div className="work-calc">
@@ -111,8 +112,9 @@ export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMi
       {normalTotal != null && (
         <div className="work-calc__item" title={`Snitt av ${normal.n} tidigare dagar${normal.tier === "veckodag" ? " (samma veckodag)" : ""}`}>
           <span className="work-calc__lbl">Normalt idag</span>
-          <span className="work-calc__val" style={{ color: todayTotal > normalTotal ? C.yellow : "var(--dim)" }}>
-            ~{normalTotal}st {todayTotal > normalTotal ? "(över snitt)" : ""}
+          <span className="work-calc__val" style={{ display: "flex", alignItems: "center", gap: 6, color: todayTotal > normalTotal ? C.yellow : "var(--dim)" }}>
+            ~{normalTotal}st · idag {todayTotal}
+            {normalPct != null && <DeltaChip pct={normalPct} />}
           </span>
         </div>
       )}
