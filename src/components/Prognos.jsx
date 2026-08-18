@@ -5,6 +5,7 @@ import { parsePFExport } from "../shared/parsers";
 import { classifyLocation } from "../shared/liveUtils";
 import { fetchPfDays, upsertPfDay } from "../shared/pfDaysDb";
 import { fetchLedtidObservations } from "../shared/ledtidDb";
+import { useSetting } from "../shared/useSetting";
 import {
   KURVA, MIN_SAMPLES_VECKODAG, MIN_SAMPLES_POOLAD, MIN_SAMPLES_MANAD,
   dagenArKomplett, buildEmpiriskKurva, getAndelKlar, calcPrognos,
@@ -14,6 +15,11 @@ function toMin(str) {
   if (!str) return null;
   const [h, m] = String(str).split(":").map(Number);
   return isNaN(h) ? null : h * 60 + (m || 0);
+}
+
+function fmtHM(mins) {
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
 const VECKODAGAR = ["Sön","Mån","Tis","Ons","Tor","Fre","Lör"];
@@ -75,6 +81,7 @@ export default function Prognos() {
   const [storedDays, setStoredDays] = useState([]);
   const [filterVeckodag, setFilterVeckodag] = useState(false);
   const [ledtidObs, setLedtidObs]   = useState([]);
+  const [checkpoints, setCheckpoints] = useSetting("prognos_checkpoints", {});
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
@@ -138,6 +145,15 @@ export default function Prognos() {
     const gmLåg = gmProg.kvar != null ? Math.round(gmProg.kvar * 0.75) : null;
     const gmHög = gmProg.kvar != null ? Math.round(gmProg.kvar * 1.25) : null;
 
+    // Number of Labels is per-PF-row cartons — already parsed onto each row
+    // (parsePFExport) but otherwise unused. No dedicated curve for it (not
+    // enough data to self-learn a separate shape), so it rides the same
+    // TOTAL curve's "% of day done" as PF-row-count — a reasonable proxy
+    // since cartons arrive alongside the same påfyllningar.
+    const kartSett = todayData.rows?.reduce((s, r) => s + (r.labels || 0), 0) ?? 0;
+    const kartEstTotal = andelKlarTotal > 0 ? Math.round(kartSett / andelKlarTotal) : null;
+    const kartKvar = kartEstTotal != null ? Math.max(0, kartEstTotal - kartSett) : null;
+
     const tooEarly   = nowHour < 7;
     const morningWarn = !tooEarly && nowHour < 8 && andelKlarTotal < 0.20;
 
@@ -149,11 +165,42 @@ export default function Prognos() {
       mezz: { sett: perKalla.Mezz, kvar: mezzProg.kvar },
       ulc:  { sett: perKalla.ULC,  kvar: ulcProg.kvar },
       pl09: { sett: perKalla.PL09, kvar: pl09Prog.kvar },
+      kartonger: { sett: kartSett, kvar: kartKvar, estTotal: kartEstTotal },
       perTimme,
       tooEarly, morningWarn,
       kurvaTier: effectiveKurva.tier, kurvaN: effectiveKurva.n,
     };
   }, [todayData, nowT, nowHour, effectiveKurva]);
+
+  const todayCheckpoint = todayData ? checkpoints[todayData.datum] : null;
+
+  const saveCheckpoint = () => {
+    if (!todayData || !forecast) return;
+    setCheckpoints(prev => ({
+      ...prev,
+      [todayData.datum]: {
+        mins: now.getHours() * 60 + now.getMinutes(),
+        sett: forecast.sett,
+        estTotal: forecast.totalEst,
+        kartSett: forecast.kartonger.sett,
+        kartEstTotal: forecast.kartonger.estTotal,
+      },
+    }));
+  };
+
+  // Past saved guesses vs. the actual final total, once that day's stored
+  // record looks complete (dagenArKomplett) — comparing against a still-
+  // partial day would make an accurate guess look like a miss.
+  const facit = useMemo(() => {
+    const out = [];
+    for (const [datum, cp] of Object.entries(checkpoints)) {
+      if (datum === todayData?.datum) continue;
+      const day = storedDays.find(d => d.datum === datum);
+      if (!day || !dagenArKomplett(day)) continue;
+      out.push({ datum, ...cp, actual: day.total });
+    }
+    return out.sort((a, b) => b.datum.localeCompare(a.datum)).slice(0, 8);
+  }, [checkpoints, storedDays, todayData]);
 
   const kbanaForecast = useMemo(() => {
     if (!forecast || forecast.tooEarly) return null;
@@ -425,6 +472,10 @@ export default function Prognos() {
                 <div style={{ fontSize: 11, color: C.dim, letterSpacing: "0.1em", marginBottom: 6 }}>ÅTERSTÅR IDAG (EST.)</div>
                 <div style={{ fontSize: 48, fontWeight: 800, color: C.text, lineHeight: 1 }}>~{forecast.totalKvar}</div>
                 <div style={{ fontSize: 13, color: C.textDim, marginTop: 4 }}>PF kvar att ta emot</div>
+                <div style={{ fontSize: 12, color: C.dim, marginTop: 8 }}>
+                  ≈ <strong style={{ color: C.text }}>{forecast.totalEst}</strong> PF totalt idag
+                  {forecast.kartonger.estTotal != null && <> · ≈ <strong style={{ color: C.text }}>{forecast.kartonger.estTotal}</strong> kartonger</>}
+                </div>
               </div>
               {/* Progress bar */}
               <div style={{ padding: "0 16px 16px" }}>
@@ -436,6 +487,43 @@ export default function Prognos() {
                   <span>{100 - forecast.klartPct}% kvar</span>
                 </div>
               </div>
+            </Panel>
+          )}
+
+          {/* Spara dagens gissning + facit mot tidigare sparade gissningar */}
+          {!forecast.tooEarly && forecast.totalEst != null && (
+            <Panel title="GISSNING & TRÄFFSÄKERHET">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "6px 0 14px" }}>
+                <div style={{ fontSize: 12, color: C.textDim }}>
+                  {todayCheckpoint
+                    ? <>Sparad kl {fmtHM(todayCheckpoint.mins)}: <strong style={{ color: C.text }}>~{todayCheckpoint.estTotal} PF</strong> (utifrån {todayCheckpoint.sett} sett)
+                        {todayCheckpoint.kartEstTotal != null && <> · ~{todayCheckpoint.kartEstTotal} kartonger</>}</>
+                    : <>Spara nuvarande gissning (~{forecast.totalEst} PF) så du kan se hur den stämde när dagen är slut.</>}
+                </div>
+                <button
+                  onClick={saveCheckpoint}
+                  style={{ fontSize: 11, padding: "5px 12px", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap",
+                    border: `1px solid ${C.accent}`, background: C.accent + "18", color: C.accent, fontWeight: 700 }}>
+                  {todayCheckpoint ? "Uppdatera gissning" : `Spara gissning kl ${tidStr}`}
+                </button>
+              </div>
+
+              {facit.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, color: C.dim, marginBottom: 8 }}>Tidigare sparade gissningar vs. facit:</div>
+                  {facit.map(f => {
+                    const wd = VECKODAGAR[new Date(f.datum + "T12:00:00").getDay()];
+                    const pctOff = f.estTotal ? Math.round(((f.actual - f.estTotal) / f.estTotal) * 100) : null;
+                    return (
+                      <div key={f.datum} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "7px 0", borderBottom: `1px solid ${C.border}`, fontSize: 12, flexWrap: "wrap" }}>
+                        <span style={{ color: C.textDim, flexShrink: 0 }}>{wd} {f.datum.slice(5)} · kl {fmtHM(f.mins)}</span>
+                        <span style={{ color: C.text }}>gissade ~{f.estTotal} ({f.sett} sett) → blev <strong>{f.actual}</strong></span>
+                        <DeltaChip pct={pctOff} />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </Panel>
           )}
 
@@ -475,6 +563,18 @@ export default function Prognos() {
               ))}
             </div>
           </Panel>
+
+          {/* Kartonger — labels-kolumnen, egen enhet, inte en "källa" som ovan */}
+          {forecast.kartonger.estTotal != null && (
+            <Panel title="KARTONGER (LABELS)">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0" }}>
+                <span style={{ fontSize: 11, color: C.dim }}>Sett {forecast.kartonger.sett}</span>
+                <span style={{ fontWeight: 700, color: C.textDim, fontVariantNumeric: "tabular-nums" }}>
+                  ~{forecast.kartonger.kvar} kvar · ≈{forecast.kartonger.estTotal} totalt
+                </span>
+              </div>
+            </Panel>
+          )}
 
           {/* Hourly distribution chart */}
           <Panel title="INFLÖDE PER TIMME (IDAG)">
