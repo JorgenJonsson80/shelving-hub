@@ -142,6 +142,7 @@ export default function Live() {
   const [staffing,        setStaffing]        = useState(null);
   const [staffErr,        setStaffErr]        = useState(null);
   const [manualBemanning, setManualBemanning] = useSetting("live_bemanning", {});
+  const [bemanningHist,   setBemanningHist]   = useSetting("live_bemanning_hist", {});
   const [manualPall,      setManualPall]      = useSetting("live_pall", {});
   const [schedule,        setSchedule]        = useSetting("live_schedule", {});
   const [bastidPerK,      setBastidPerK]      = useSetting("live_bastid", {});
@@ -159,9 +160,36 @@ export default function Live() {
   }, []);
 
   const nowMins = now.getHours() * 60 + now.getMinutes();
+  const todayDatum = now.toLocaleDateString("sv-SE");
   const kbanaNormals = useMemo(() => buildKbanaNormals(historikDays, now.getDay()), [historikDays, now]);
 
   const getBastid = (kb) => bastidPerK[kb.kbana] ?? defaultBastid(kb);
+  const persHistToday = useCallback(
+    (kbana) => (bemanningHist[kbana] || []).filter(h => h.datum === todayDatum),
+    [bemanningHist, todayDatum]
+  );
+
+  // Logs when — not just what — a lane's headcount changes, so calcWork can
+  // tell efficiency-so-far apart from the current live number instead of
+  // (wrongly) assuming today's latest headcount applied all day. On the
+  // first edit of the day, also backfills today's *previous* value (even if
+  // never logged, e.g. left over from yesterday) as the best guess for what
+  // applied before now — without it there'd be no record covering the time
+  // between shift start and this first edit.
+  const recordPersChange = (kbana, value) => {
+    if (value === "") return;
+    setBemanningHist(prev => {
+      const todays = (prev[kbana] || []).filter(h => h.datum === todayDatum);
+      if (todays.length && todays[todays.length - 1].pers === value) return prev;
+      const list = [...todays];
+      const old = manualBemanning[kbana];
+      if (!list.length && typeof old === "number" && old > 0) {
+        list.push({ datum: todayDatum, mins: 0, pers: old });
+      }
+      list.push({ datum: todayDatum, mins: nowMins, pers: value });
+      return { ...prev, [kbana]: list };
+    });
+  };
 
   // ── EN beräkningsmodell ───────────────────────────────────────────────────
   const analys = useMemo(() => {
@@ -179,7 +207,7 @@ export default function Live() {
       const kartKvar  = kb.kart ? (kb.kart.iko || 0) + (kb.kart.pavag || 0) : 0;
 
       const { sen, pr, tk, jobbKvar, bem } = calcLaneMetrics(
-        kb.pafyll, kb.kart, pallKvar, pallKlart, pers, sched, nowMins, bastid
+        kb.pafyll, kb.kart, pallKvar, pallKlart, pers, sched, nowMins, bastid, persHistToday(kb.kbana)
       );
       if (sen === null) return { id: kb.kbana, sen: 0, pr, tk: 0, jobbKvar: 0, bem, kategori: "saknas", kartKvar, pallKvar, kolliKvar };
 
@@ -206,7 +234,7 @@ export default function Live() {
       .sort((a, b) => a.sen - b.sen);
 
     return { banor, lediga, kriser };
-  }, [data, manualBemanning, manualPall, schedule, nowMins, bastidPerK]);
+  }, [data, manualBemanning, persHistToday, manualPall, schedule, nowMins, bastidPerK]);
 
   // ── Åtgärdsplan från EN matchningsloop ───────────────────────────────────
   const atgarder = useMemo(() => {
@@ -284,6 +312,10 @@ export default function Live() {
     parseStaffingFile(f).then(rows => {
       setStaffing(rows);
       const nm = Object.fromEntries(rows.map(r => [normKbana(r.kbana), r]));
+      if (data) for (const kb of data.kbanor) {
+        const s = nm[normKbana(kb.kbana)];
+        if (s) recordPersChange(kb.kbana, s.bemanning);
+      }
       setManualBemanning(prev => {
         const next = { ...prev };
         if (data) for (const kb of data.kbanor) {
@@ -541,7 +573,11 @@ export default function Live() {
                     <div className="staffing-manual">
                       <input type="number" min="0" step="0.5" className="staffing-input"
                         value={manualBemanning[kb.kbana] ?? ""} placeholder="–"
-                        onChange={e => setManualBemanning(prev => ({ ...prev, [kb.kbana]: e.target.value === "" ? "" : +e.target.value }))}
+                        onChange={e => {
+                          const val = e.target.value === "" ? "" : +e.target.value;
+                          recordPersChange(kb.kbana, val);
+                          setManualBemanning(prev => ({ ...prev, [kb.kbana]: val }));
+                        }}
                       />
                       <span className="staffing-label">pers</span>
                     </div>
@@ -586,6 +622,7 @@ export default function Live() {
                         pafyll={kb.pafyll} kart={kb.kart}
                         pallKvar={pallKvar} pallKlart={pallKlart}
                         pers={pers} sched={sched} nowMins={nowMins} bastidMins={bastid}
+                        persHistory={persHistToday(kb.kbana)}
                         normal={kbanaNormals[kb.kbana]}
                       />
                     )}

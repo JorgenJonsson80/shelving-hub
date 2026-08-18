@@ -120,8 +120,34 @@ export function getWorkerStatus(sched, nowMins) {
   return { active, planned };
 }
 
+// Person-minutes actually worked between startMins and nowMins, honoring any
+// recorded pers-changes in between instead of assuming today's current
+// headcount applied for the whole elapsed shift. Without that, bumping the
+// headcount mid-shift retroactively (and wrongly) drags measured efficiency
+// down for hours nobody was understaffed, and removing someone inflates it —
+// see persHistory shape: [{ mins, pers }, ...], already filtered to today.
+export function spentPersonMins(persHistory, startMins, nowMins, currentPers) {
+  const points = (persHistory || [])
+    .filter(h => h.mins > startMins && h.mins <= nowMins)
+    .sort((a, b) => a.mins - b.mins);
+  const before = (persHistory || [])
+    .filter(h => h.mins <= startMins)
+    .sort((a, b) => b.mins - a.mins)[0];
+  // No record covering the start of the shift — best guess is whatever the
+  // earliest known value is (or the current one if there's no history at all).
+  const startPers = before ? before.pers : (points[0]?.pers ?? currentPers);
+
+  const bounds = [{ mins: startMins, pers: startPers }, ...points, { mins: nowMins, pers: currentPers }];
+  let total = 0;
+  for (let i = 0; i < bounds.length - 1; i++) {
+    const dur = bounds[i + 1].mins - bounds[i].mins;
+    if (dur > 0) total += dur * bounds[i].pers;
+  }
+  return Math.max(0, total);
+}
+
 // Formula: arbetsminuter = kolli × bastid + kartonger × 0.6 + pallar × 12
-export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins) {
+export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory) {
   if (!pafyll || !sched || !sched.length || !pers || pers <= 0) return null;
   const bounds = getShiftBounds(sched);
   if (!bounds) return null;
@@ -139,7 +165,7 @@ export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins
   const availMins = pers * remainH * 60;
   const buffer    = availMins - remainWork;
 
-  const spentMins = elapsedH * 60 * pers;
+  const spentMins = spentPersonMins(persHistory, bounds.startMins, nowMins, pers);
   const efficiency = spentMins > 3 ? (doneWork / spentMins) * 100 : null;
 
   return { remainWork, doneWork, availMins, buffer, efficiency, remainH, elapsedH, endMins: bounds.endMins };
@@ -161,8 +187,8 @@ export function fmtClock(mins) {
   return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}${rolled ? " (+1d)" : ""}`;
 }
 
-export function calcLaneMetrics(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins) {
-  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins);
+export function calcLaneMetrics(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory) {
+  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory);
   const { active } = getWorkerStatus(sched, nowMins);
   return {
     sen:      w ? w.buffer / 60 : null,

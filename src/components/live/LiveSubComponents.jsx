@@ -53,8 +53,8 @@ export function AheadBehindPill({ flow, sched, nowMins }) {
   );
 }
 
-export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, normal }) {
-  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins);
+export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, normal }) {
+  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory);
   if (!w) return null;
 
   const onTrack = w.buffer >= 0;

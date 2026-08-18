@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normKbana, classifyLocation } from "./liveUtils.js";
+import { normKbana, classifyLocation, spentPersonMins } from "./liveUtils.js";
 
 // ── normKbana ─────────────────────────────────────────────────────────────────
 
@@ -55,5 +55,44 @@ describe("classifyLocation", () => {
     // lpl = first number after dash; even → K58, odd → K56
     expect(classifyLocation("P4-10-A-12")).toBe("K58");
     expect(classifyLocation("P4-11-A-12")).toBe("K56");
+  });
+});
+
+// ── spentPersonMins ───────────────────────────────────────────────────────────
+
+describe("spentPersonMins", () => {
+  const H = (h, m = 0) => h * 60 + m;
+
+  it("matches flat pers × elapsed time when there's no history", () => {
+    expect(spentPersonMins([], H(6), H(12), 3)).toBe(6 * 60 * 3);
+  });
+
+  it("ignores a headcount bumped mid-shift for the time before the change", () => {
+    // 2 pers 06–10, bumped to 3 at 10:00, now 12:00 — must not treat the
+    // whole 6h as if 3 people worked it (that's the bug this replaces).
+    const hist = [{ mins: 0, pers: 2 }, { mins: H(10), pers: 3 }];
+    expect(spentPersonMins(hist, H(6), H(12), 3)).toBe(4 * 60 * 2 + 2 * 60 * 3);
+  });
+
+  it("falls back to the first recorded value when nothing covers shift start", () => {
+    // No baseline entry at all before the first logged change — the function
+    // can't know what applied earlier, so it assumes the first known value
+    // held since shift start (same simplification as the no-history case).
+    const hist = [{ mins: H(10), pers: 3 }];
+    expect(spentPersonMins(hist, H(6), H(12), 3)).toBe(6 * 60 * 3);
+  });
+
+  it("handles multiple changes within the same shift", () => {
+    const hist = [{ mins: 0, pers: 2 }, { mins: H(10), pers: 3 }, { mins: H(11), pers: 4 }];
+    expect(spentPersonMins(hist, H(6), H(12), 4)).toBe(4 * 60 * 2 + 1 * 60 * 3 + 1 * 60 * 4);
+  });
+
+  it("uses a change recorded before shift start as the starting value", () => {
+    const hist = [{ mins: H(5), pers: 2 }, { mins: H(10), pers: 3 }];
+    expect(spentPersonMins(hist, H(6), H(12), 3)).toBe(4 * 60 * 2 + 2 * 60 * 3);
+  });
+
+  it("never returns a negative total", () => {
+    expect(spentPersonMins([], H(12), H(6), 3)).toBe(0);
   });
 });
