@@ -82,6 +82,7 @@ export default function Prognos() {
   const [filterVeckodag, setFilterVeckodag] = useState(false);
   const [ledtidObs, setLedtidObs]   = useState([]);
   const [checkpoints, setCheckpoints] = useSetting("prognos_checkpoints", {});
+  const [, setSharedKbanaForecast]    = useSetting("prognos_kbana_forecast", null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
@@ -321,6 +322,21 @@ export default function Prognos() {
 
     return result.sort((a, b) => b.estTotal - a.estTotal);
   }, [forecast, nowHour, filterVeckodag, todayData, storedDays, ledtidObs]);
+
+  // Shares today's per-K-bana expected-remaining with Live.jsx (same
+  // app_settings mechanism as prognos_checkpoints) so its Buffert/Saldo can
+  // account for volume that hasn't arrived yet, not just what's already in
+  // queue. All tabs stay mounted at once (see App.jsx), so this keeps
+  // refreshing every minute — via `forecast`, which ticks with `now` — as
+  // long as today's PF-export is loaded here, even while looking at Live.
+  useEffect(() => {
+    if (!kbanaForecast || !todayData) return;
+    setSharedKbanaForecast({
+      datum: todayData.datum,
+      mins: now.getHours() * 60 + now.getMinutes(),
+      byKb: Object.fromEntries(kbanaForecast.map(k => [k.kb, k.exp])),
+    });
+  }, [kbanaForecast, todayData, now, setSharedKbanaForecast]);
 
   const multiFill = useMemo(() => {
     if (!todayData?.rows) return null;

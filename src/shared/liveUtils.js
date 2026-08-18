@@ -147,7 +147,13 @@ export function spentPersonMins(persHistory, startMins, nowMins, currentPers) {
 }
 
 // Formula: arbetsminuter = kolli × bastid + kartonger × 0.6 + pallar × 12
-export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory) {
+//
+// `forecastKolli` (optional) is expected-remaining PF for this K-bana for
+// the rest of today, from Prognos.jsx's per-K-bana forecast — otherwise
+// remainWork only ever reflects what's already sitting in queue right now,
+// so a lane looks comfortably ahead all morning and then falls off a cliff
+// the moment a forecasted wave (e.g. a midday release) actually lands.
+export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli = 0) {
   if (!pafyll || !sched || !sched.length || !pers || pers <= 0) return null;
   const bounds = getShiftBounds(sched);
   if (!bounds) return null;
@@ -158,8 +164,9 @@ export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins
   const kartKvar    = kart ? kart.iko + kart.pavag : 0;
   const pafyllKlart = pafyll.klart;
   const kartKlart   = kart ? kart.klart : 0;
+  const forecastKvar = Math.max(0, forecastKolli || 0);
 
-  const remainWork = pafyllKvar * bastidMins + kartKvar * KARTONG_MIN + pallKvar * 12;
+  const remainWork = (pafyllKvar + forecastKvar) * bastidMins + kartKvar * KARTONG_MIN + pallKvar * 12;
   const doneWork   = pafyllKlart * bastidMins + kartKlart * KARTONG_MIN + pallKlart * 12;
 
   const availMins = pers * remainH * 60;
@@ -168,7 +175,7 @@ export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins
   const spentMins = spentPersonMins(persHistory, bounds.startMins, nowMins, pers);
   const efficiency = spentMins > 3 ? (doneWork / spentMins) * 100 : null;
 
-  return { remainWork, doneWork, availMins, buffer, efficiency, remainH, elapsedH, endMins: bounds.endMins };
+  return { remainWork, doneWork, availMins, buffer, efficiency, remainH, elapsedH, endMins: bounds.endMins, forecastKvar };
 }
 
 export function fmtMins(mins) {
@@ -187,8 +194,8 @@ export function fmtClock(mins) {
   return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}${rolled ? " (+1d)" : ""}`;
 }
 
-export function calcLaneMetrics(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory) {
-  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory);
+export function calcLaneMetrics(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli) {
+  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli);
   const { active } = getWorkerStatus(sched, nowMins);
   return {
     sen:      w ? w.buffer / 60 : null,

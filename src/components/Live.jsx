@@ -143,6 +143,7 @@ export default function Live() {
   const [staffErr,        setStaffErr]        = useState(null);
   const [manualBemanning, setManualBemanning] = useSetting("live_bemanning", {});
   const [bemanningHist,   setBemanningHist]   = useSetting("live_bemanning_hist", {});
+  const [prognosForecast]                     = useSetting("prognos_kbana_forecast", null);
   const [manualPall,      setManualPall]      = useSetting("live_pall", {});
   const [schedule,        setSchedule]        = useSetting("live_schedule", {});
   const [bastidPerK,      setBastidPerK]      = useSetting("live_bastid", {});
@@ -164,6 +165,10 @@ export default function Live() {
   const kbanaNormals = useMemo(() => buildKbanaNormals(historikDays, now.getDay()), [historikDays, now]);
 
   const getBastid = (kb) => bastidPerK[kb.kbana] ?? defaultBastid(kb);
+  // Only trust the forecast if Prognos.jsx actually computed it today —
+  // otherwise (stale from yesterday, or Prognos never opened) treat it as
+  // absent so remainWork silently falls back to queue-only, same as before.
+  const forecastByKb = prognosForecast?.datum === todayDatum ? prognosForecast.byKb : null;
   const persHistToday = useCallback(
     (kbana) => (bemanningHist[kbana] || []).filter(h => h.datum === todayDatum),
     [bemanningHist, todayDatum]
@@ -207,7 +212,8 @@ export default function Live() {
       const kartKvar  = kb.kart ? (kb.kart.iko || 0) + (kb.kart.pavag || 0) : 0;
 
       const { sen, pr, tk, jobbKvar, bem } = calcLaneMetrics(
-        kb.pafyll, kb.kart, pallKvar, pallKlart, pers, sched, nowMins, bastid, persHistToday(kb.kbana)
+        kb.pafyll, kb.kart, pallKvar, pallKlart, pers, sched, nowMins, bastid,
+        persHistToday(kb.kbana), forecastByKb?.[kb.kbana]
       );
       if (sen === null) return { id: kb.kbana, sen: 0, pr, tk: 0, jobbKvar: 0, bem, kategori: "saknas", kartKvar, pallKvar, kolliKvar };
 
@@ -234,7 +240,7 @@ export default function Live() {
       .sort((a, b) => a.sen - b.sen);
 
     return { banor, lediga, kriser };
-  }, [data, manualBemanning, persHistToday, manualPall, schedule, nowMins, bastidPerK]);
+  }, [data, manualBemanning, persHistToday, forecastByKb, manualPall, schedule, nowMins, bastidPerK]);
 
   // ── Åtgärdsplan från EN matchningsloop ───────────────────────────────────
   const atgarder = useMemo(() => {
@@ -409,7 +415,14 @@ export default function Live() {
           {/* ── Saldo-block: Klarar vi passet? ── */}
           {saldoBlock && (
             <div className="section-card" style={{ marginBottom: 8, border: `1px solid ${saldoBlock.saldo < -2 ? C.red + "66" : saldoBlock.saldo < 0 ? C.yellow + "66" : C.green + "44"}` }}>
-              <div className="section-card__header section-card__header--accent">KLARAR VI PASSET?</div>
+              <div className="section-card__header section-card__header--accent">
+                KLARAR VI PASSET?
+                {forecastByKb && (
+                  <span style={{ fontWeight: 400, fontSize: 11, color: C.dim, marginLeft: 8 }}>
+                    · inkl. väntat inflöde (Prognos kl {String(Math.floor(prognosForecast.mins / 60)).padStart(2, "0")}:{String(prognosForecast.mins % 60).padStart(2, "0")})
+                  </span>
+                )}
+              </div>
               <div className="section-card__body">
                 <div style={{ display: "flex", gap: 0, marginBottom: 10 }}>
                   <div style={{ flex: 1, padding: "10px 14px", borderRight: `1px solid ${C.border}` }}>
@@ -623,6 +636,7 @@ export default function Live() {
                         pallKvar={pallKvar} pallKlart={pallKlart}
                         pers={pers} sched={sched} nowMins={nowMins} bastidMins={bastid}
                         persHistory={persHistToday(kb.kbana)}
+                        forecastKolli={forecastByKb?.[kb.kbana]}
                         normal={kbanaNormals[kb.kbana]}
                       />
                     )}

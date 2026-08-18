@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normKbana, classifyLocation, spentPersonMins } from "./liveUtils.js";
+import { normKbana, classifyLocation, spentPersonMins, calcWork } from "./liveUtils.js";
 
 // ── normKbana ─────────────────────────────────────────────────────────────────
 
@@ -94,5 +94,33 @@ describe("spentPersonMins", () => {
 
   it("never returns a negative total", () => {
     expect(spentPersonMins([], H(12), H(6), 3)).toBe(0);
+  });
+});
+
+// ── calcWork forecastKolli ────────────────────────────────────────────────────
+
+describe("calcWork forecastKolli", () => {
+  const H = (h, m = 0) => h * 60 + m;
+  const pafyll = { iko: 10, pavag: 0, klart: 0 };
+  const sched = [{ start: "06:00", end: "14:00" }];
+
+  it("adds expected-remaining PF (converted via bastid) on top of the current queue", () => {
+    const withoutForecast = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8);
+    const withForecast    = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8, [], 20);
+    expect(withForecast.remainWork).toBeCloseTo(withoutForecast.remainWork + 20 * 1.8);
+    expect(withForecast.forecastKvar).toBe(20);
+  });
+
+  it("defaults to 0 (no behavior change) when forecastKolli is omitted", () => {
+    const a = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8);
+    const b = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8, []);
+    expect(a.remainWork).toBe(b.remainWork);
+    expect(a.forecastKvar).toBe(0);
+  });
+
+  it("never lets a negative forecast reduce remainWork", () => {
+    const withNegative = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8, [], -50);
+    const plain = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8);
+    expect(withNegative.remainWork).toBe(plain.remainWork);
   });
 });

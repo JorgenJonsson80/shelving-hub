@@ -53,8 +53,8 @@ export function AheadBehindPill({ flow, sched, nowMins }) {
   );
 }
 
-export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, normal }) {
-  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory);
+export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli, normal }) {
+  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli);
   if (!w) return null;
 
   const onTrack = w.buffer >= 0;
@@ -88,7 +88,14 @@ export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMi
         <span className="work-calc__val">{fmtMins(w.remainWork)}</span>
       </div>
       <div className="work-calc__item">
-        <span className="work-calc__lbl">Buffert</span>
+        <span className="work-calc__lbl">
+          Buffert
+          {w.forecastKvar > 0 && (
+            <span style={{ display: "block", fontSize: 10, color: "var(--dim)", fontWeight: 400 }}>
+              inkl. ~{Math.round(w.forecastKvar)} väntat (prognos)
+            </span>
+          )}
+        </span>
         <span className="work-calc__val" style={{ color: bufferColor }}>
           {onTrack ? "+" : "–"}{fmtMins(w.buffer)}
         </span>
