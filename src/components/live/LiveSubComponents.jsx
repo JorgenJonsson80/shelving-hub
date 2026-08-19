@@ -53,8 +53,8 @@ export function AheadBehindPill({ flow, sched, nowMins }) {
   );
 }
 
-export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli, normal }) {
-  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli);
+export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli, forecastKart, normal }) {
+  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli, forecastKart);
   if (!w) return null;
 
   const onTrack = w.buffer >= 0;
@@ -90,9 +90,12 @@ export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMi
       <div className="work-calc__item">
         <span className="work-calc__lbl">
           Buffert
-          {w.forecastKvar > 0 && (
+          {(w.forecastKvar > 0 || w.forecastKartKvar > 0) && (
             <span style={{ display: "block", fontSize: 10, color: "var(--dim)", fontWeight: 400 }}>
-              inkl. ~{Math.round(w.forecastKvar)} väntat (prognos)
+              inkl. väntat (prognos):
+              {w.forecastKvar > 0 && ` ~${Math.round(w.forecastKvar)} kolli`}
+              {w.forecastKvar > 0 && w.forecastKartKvar > 0 && " +"}
+              {w.forecastKartKvar > 0 && ` ~${Math.round(w.forecastKartKvar)} kartonger`}
             </span>
           )}
         </span>

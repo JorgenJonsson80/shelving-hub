@@ -96,3 +96,23 @@ export function calcPrognos(kurva, kalla, sett, nowT) {
   const kvar = Math.max(0, estTotal - sett);
   return { estTotal: Math.round(estTotal), kvar: Math.round(kvar), andelKlar };
 }
+
+// Cartons ("kartonger", PF-row `labels` column) have no dedicated self-
+// learning curve — no per-hour history is stored for them (see
+// buildEmpiriskKurva, which only tracks GM/Mezz/ULC/PL09/TOTAL row counts) —
+// so the estimate rides the same TOTAL "% of day done" curve as PF-row-count,
+// a reasonable proxy since cartons arrive alongside the same påfyllningar.
+// Unlike PF-row-count (self-consistent with its own curve by definition),
+// the labels-per-row ratio isn't constant through the day, and dividing by a
+// small andelKlar amplifies that mismatch heavily: at andelKlar 0.13 a
+// single delivery with an unusually high carton count gets blown up ~7.7x.
+// Bug report 2026-08-19: guessed 7000 kartonger around 7:30 when the day
+// landed at 3500–4500 (PF-row estimate was fine at the same moment). Require
+// the day to be far enough along before trusting the number at all.
+export const KART_MIN_ANDEL = 0.30;
+export function calcKartongPrognos(andelKlarTotal, kartSett) {
+  if (andelKlarTotal < KART_MIN_ANDEL) return { estTotal: null, kvar: null, osäkert: true };
+  const estTotal = Math.round(kartSett / andelKlarTotal);
+  const kvar = Math.max(0, estTotal - kartSett);
+  return { estTotal, kvar };
+}

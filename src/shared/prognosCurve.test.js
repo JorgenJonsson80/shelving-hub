@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { KURVA, getAndelKlar, calcPrognos } from "./prognosCurve.js";
+import { KURVA, getAndelKlar, calcPrognos, calcKartongPrognos, KART_MIN_ANDEL } from "./prognosCurve.js";
 
 // ── getAndelKlar ──────────────────────────────────────────────────────────
 
@@ -63,6 +63,31 @@ describe("calcPrognos", () => {
     // ULC's curve reaches exactly 100 in its last bucket, so andelKlar = 1.0
     // and estTotal === sett — kvar should land on 0, not dip negative.
     const { kvar } = calcPrognos(KURVA, "ULC", 500, 18);
+    expect(kvar).toBe(0);
+  });
+});
+
+// ── calcKartongPrognos ────────────────────────────────────────────────────
+
+describe("calcKartongPrognos", () => {
+  it("marks the result uncertain below the confidence floor, even with a real sett value", () => {
+    // Regression test for the 2026-08-19 bug report: guessed 7000 kartonger
+    // around 7:30 (andelKlar ≈ 0.13) when the day landed at 3500–4500.
+    const res = calcKartongPrognos(0.13, 900);
+    expect(res.osäkert).toBe(true);
+    expect(res.estTotal).toBeNull();
+    expect(res.kvar).toBeNull();
+  });
+
+  it("estimates a total once andelKlar reaches the confidence floor", () => {
+    const res = calcKartongPrognos(KART_MIN_ANDEL, 1200);
+    expect(res.osäkert).toBeUndefined();
+    expect(res.estTotal).toBe(4000);
+    expect(res.kvar).toBe(2800);
+  });
+
+  it("never returns a negative kvar", () => {
+    const { kvar } = calcKartongPrognos(1.0, 4000);
     expect(kvar).toBe(0);
   });
 });

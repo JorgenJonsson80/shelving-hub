@@ -8,7 +8,7 @@ import { fetchLedtidObservations } from "../shared/ledtidDb";
 import { useSetting } from "../shared/useSetting";
 import {
   KURVA, MIN_SAMPLES_VECKODAG, MIN_SAMPLES_POOLAD, MIN_SAMPLES_MANAD,
-  dagenArKomplett, buildEmpiriskKurva, getAndelKlar, calcPrognos,
+  dagenArKomplett, buildEmpiriskKurva, getAndelKlar, calcPrognos, calcKartongPrognos,
 } from "../shared/prognosCurve";
 
 function toMin(str) {
@@ -147,13 +147,10 @@ export default function Prognos() {
     const gmHög = gmProg.kvar != null ? Math.round(gmProg.kvar * 1.25) : null;
 
     // Number of Labels is per-PF-row cartons — already parsed onto each row
-    // (parsePFExport) but otherwise unused. No dedicated curve for it (not
-    // enough data to self-learn a separate shape), so it rides the same
-    // TOTAL curve's "% of day done" as PF-row-count — a reasonable proxy
-    // since cartons arrive alongside the same påfyllningar.
+    // (parsePFExport) but otherwise unused. See calcKartongPrognos for why
+    // this needs its own (higher) confidence floor than the PF-row estimate.
     const kartSett = todayData.rows?.reduce((s, r) => s + (r.labels || 0), 0) ?? 0;
-    const kartEstTotal = andelKlarTotal > 0 ? Math.round(kartSett / andelKlarTotal) : null;
-    const kartKvar = kartEstTotal != null ? Math.max(0, kartEstTotal - kartSett) : null;
+    const { estTotal: kartEstTotal, kvar: kartKvar } = calcKartongPrognos(andelKlarTotal, kartSett);
 
     const tooEarly   = nowHour < 7;
     const morningWarn = !tooEarly && nowHour < 8 && andelKlarTotal < 0.20;
@@ -206,12 +203,16 @@ export default function Prognos() {
   const kbanaForecast = useMemo(() => {
     if (!forecast || forecast.tooEarly) return null;
 
-    // Today's already-processed PF per K-bana from uploaded file
+    // Today's already-processed PF (and cartons) per K-bana from uploaded file
     const todayKbMap = {};
+    const todayKartMap = {};
     if (todayData?.rows) {
       for (const row of todayData.rows) {
         const kb = classifyLocation(row.toLoc);
-        if (kb) todayKbMap[kb] = (todayKbMap[kb] || 0) + 1;
+        if (kb) {
+          todayKbMap[kb] = (todayKbMap[kb] || 0) + 1;
+          todayKartMap[kb] = (todayKartMap[kb] || 0) + (row.labels || 0);
+        }
       }
     }
 
@@ -260,14 +261,16 @@ export default function Prognos() {
       for (const row of day.rows) {
         const kb = classifyLocation(row.toLoc);
         if (!kb) continue;
-        if (!dayKb[kb]) dayKb[kb] = { pf: 0, src: { GM:0,Mezz:0,ULC:0,PL09:0 }, pt: Array(24).fill(0) };
+        if (!dayKb[kb]) dayKb[kb] = { pf: 0, labels: 0, src: { GM:0,Mezz:0,ULC:0,PL09:0 }, pt: Array(24).fill(0) };
         dayKb[kb].pf++;
+        dayKb[kb].labels += row.labels || 0;
         if (row.kalla in dayKb[kb].src) dayKb[kb].src[row.kalla]++;
         if (row.hour >= 0 && row.hour < 24) dayKb[kb].pt[row.hour]++;
       }
       for (const [kb, d] of Object.entries(dayKb)) {
-        if (!hist[kb]) hist[kb] = { pf: 0, src: { GM:0,Mezz:0,ULC:0,PL09:0 }, pt: Array(24).fill(0) };
+        if (!hist[kb]) hist[kb] = { pf: 0, labels: 0, src: { GM:0,Mezz:0,ULC:0,PL09:0 }, pt: Array(24).fill(0) };
         hist[kb].pf += d.pf;
+        hist[kb].labels += d.labels;
         for (const s of ["GM","Mezz","ULC","PL09"]) { hist[kb].src[s] += d.src[s]; srcTot[s] += d.src[s]; }
         d.pt.forEach((v, h) => { hist[kb].pt[h] += v; });
       }
@@ -317,7 +320,19 @@ export default function Prognos() {
       const estTotal = today + Math.round(exp);
       const monthAvg = monthAvgByKb[kb] ?? null;
       const vsMonthAvg = monthAvg ? Math.round(((estTotal - monthAvg) / monthAvg) * 100) : null;
-      result.push({ kb, exp: Math.round(exp), timme, topp, ledtidMins: ledtidKb[kb] || 0, today, estTotal, monthAvg, vsMonthAvg });
+
+      // Expected remaining cartons for this K-bana: this K-bana's expected
+      // remaining PF-rows (exp, above) times its own historical labels-per-
+      // row ratio. Reuses the already-validated per-kbana `exp` split
+      // instead of needing a separate per-källa cartons breakdown. Only
+      // trusted once the global kartonger estimate itself is (see
+      // calcKartongPrognos's confidence floor) — null otherwise, same as
+      // Live.jsx's existing "absent forecast → queue-only" fallback.
+      const todayKart = todayKartMap[kb] || 0;
+      const kartPerPf = h.pf > 0 ? h.labels / h.pf : 0;
+      const expKart = forecast.kartonger.kvar != null ? Math.round(exp * kartPerPf) : null;
+
+      result.push({ kb, exp: Math.round(exp), timme, topp, ledtidMins: ledtidKb[kb] || 0, today, estTotal, monthAvg, vsMonthAvg, todayKart, expKart });
     }
 
     return result.sort((a, b) => b.estTotal - a.estTotal);
@@ -335,6 +350,9 @@ export default function Prognos() {
       datum: todayData.datum,
       mins: now.getHours() * 60 + now.getMinutes(),
       byKb: Object.fromEntries(kbanaForecast.map(k => [k.kb, k.exp])),
+      kartByKb: Object.fromEntries(
+        kbanaForecast.filter(k => k.expKart != null).map(k => [k.kb, k.expKart])
+      ),
     });
   }, [kbanaForecast, todayData, now, setSharedKbanaForecast]);
 
@@ -628,6 +646,11 @@ export default function Prognos() {
                       {k.today > 0 && (
                         <span style={{ color: C.dim, fontVariantNumeric: "tabular-nums" }}>
                           {k.today} sett + ~{k.exp} kvar
+                        </span>
+                      )}
+                      {k.expKart != null && k.expKart > 0 && (
+                        <span style={{ color: C.dim, fontVariantNumeric: "tabular-nums" }}>
+                          · ~{k.expKart} kartonger kvar
                         </span>
                       )}
                       <span style={{ fontWeight: 700, color: C.accent, fontVariantNumeric: "tabular-nums" }}>

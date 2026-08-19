@@ -169,6 +169,7 @@ export default function Live() {
   // otherwise (stale from yesterday, or Prognos never opened) treat it as
   // absent so remainWork silently falls back to queue-only, same as before.
   const forecastByKb = prognosForecast?.datum === todayDatum ? prognosForecast.byKb : null;
+  const forecastKartByKb = prognosForecast?.datum === todayDatum ? prognosForecast.kartByKb : null;
   const persHistToday = useCallback(
     (kbana) => (bemanningHist[kbana] || []).filter(h => h.datum === todayDatum),
     [bemanningHist, todayDatum]
@@ -213,7 +214,7 @@ export default function Live() {
 
       const { sen, pr, tk, jobbKvar, bem } = calcLaneMetrics(
         kb.pafyll, kb.kart, pallKvar, pallKlart, pers, sched, nowMins, bastid,
-        persHistToday(kb.kbana), forecastByKb?.[kb.kbana]
+        persHistToday(kb.kbana), forecastByKb?.[kb.kbana], forecastKartByKb?.[kb.kbana]
       );
       if (sen === null) return { id: kb.kbana, sen: 0, pr, tk: 0, jobbKvar: 0, bem, kategori: "saknas", kartKvar, pallKvar, kolliKvar };
 
@@ -240,7 +241,7 @@ export default function Live() {
       .sort((a, b) => a.sen - b.sen);
 
     return { banor, lediga, kriser };
-  }, [data, manualBemanning, persHistToday, forecastByKb, manualPall, schedule, nowMins, bastidPerK]);
+  }, [data, manualBemanning, persHistToday, forecastByKb, forecastKartByKb, manualPall, schedule, nowMins, bastidPerK]);
 
   // ── Åtgärdsplan från EN matchningsloop ───────────────────────────────────
   const atgarder = useMemo(() => {
@@ -637,6 +638,7 @@ export default function Live() {
                         pers={pers} sched={sched} nowMins={nowMins} bastidMins={bastid}
                         persHistory={persHistToday(kb.kbana)}
                         forecastKolli={forecastByKb?.[kb.kbana]}
+                        forecastKart={forecastKartByKb?.[kb.kbana]}
                         normal={kbanaNormals[kb.kbana]}
                       />
                     )}
