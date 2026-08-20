@@ -7,7 +7,7 @@ import { fetchPfDays, upsertPfDay } from "../shared/pfDaysDb";
 import { fetchLedtidObservations } from "../shared/ledtidDb";
 import { useSetting } from "../shared/useSetting";
 import {
-  KURVA, MIN_SAMPLES_VECKODAG, MIN_SAMPLES_POOLAD, MIN_SAMPLES_MANAD,
+  KURVA, MIN_SAMPLES_VECKODAG, MIN_SAMPLES_POOLAD, MIN_SAMPLES_MANAD, KALLA_MIN_ANDEL,
   dagenArKomplett, buildEmpiriskKurva, getAndelKlar, calcPrognos, calcKartongPrognos,
 } from "../shared/prognosCurve";
 
@@ -159,10 +159,10 @@ export default function Prognos() {
       sett: total, klartPct,
       totalKvar: totalProg.kvar, totalEst: totalProg.estTotal,
       andelKlar: andelKlarTotal,
-      gm:   { sett: perKalla.GM,   kvar: gmProg.kvar,   låg: gmLåg, hög: gmHög },
-      mezz: { sett: perKalla.Mezz, kvar: mezzProg.kvar },
-      ulc:  { sett: perKalla.ULC,  kvar: ulcProg.kvar },
-      pl09: { sett: perKalla.PL09, kvar: pl09Prog.kvar },
+      gm:   { sett: perKalla.GM,   kvar: gmProg.kvar,   låg: gmLåg, hög: gmHög, andelKlar: gmProg.andelKlar },
+      mezz: { sett: perKalla.Mezz, kvar: mezzProg.kvar, andelKlar: mezzProg.andelKlar },
+      ulc:  { sett: perKalla.ULC,  kvar: ulcProg.kvar,  andelKlar: ulcProg.andelKlar },
+      pl09: { sett: perKalla.PL09, kvar: pl09Prog.kvar, andelKlar: pl09Prog.andelKlar },
       kartonger: { sett: kartSett, kvar: kartKvar, estTotal: kartEstTotal },
       perTimme,
       tooEarly, morningWarn,
@@ -276,12 +276,16 @@ export default function Prognos() {
       }
     }
 
-    // Remaining per source from today's prognos
+    // Remaining per source from today's prognos — floored at KALLA_MIN_ANDEL
+    // (see prognosCurve.js) so a source that's barely started for the day
+    // doesn't get an amplified kvar redistributed onto a K-bana and passed to
+    // Live as forecastKolli/forecastKart. Treated as 0 (no signal yet)
+    // rather than trusting an inflated early guess.
     const kvarSrc = {
-      GM:   forecast.gm.kvar   ?? 0,
-      Mezz: forecast.mezz.kvar ?? 0,
-      ULC:  forecast.ulc.kvar  ?? 0,
-      PL09: forecast.pl09.kvar ?? 0,
+      GM:   forecast.gm.andelKlar   >= KALLA_MIN_ANDEL ? (forecast.gm.kvar   ?? 0) : 0,
+      Mezz: forecast.mezz.andelKlar >= KALLA_MIN_ANDEL ? (forecast.mezz.kvar ?? 0) : 0,
+      ULC:  forecast.ulc.andelKlar  >= KALLA_MIN_ANDEL ? (forecast.ulc.kvar  ?? 0) : 0,
+      PL09: forecast.pl09.andelKlar >= KALLA_MIN_ANDEL ? (forecast.pl09.kvar ?? 0) : 0,
     };
 
     // Median lead time per K-bana from real Ledtid.jsx observations (Supabase)

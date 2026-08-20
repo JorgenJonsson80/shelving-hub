@@ -116,3 +116,15 @@ export function calcKartongPrognos(andelKlarTotal, kartSett) {
   const kvar = Math.max(0, estTotal - kartSett);
   return { estTotal, kvar };
 }
+
+// Same amplification risk as KART_MIN_ANDEL above (estTotal = sett /
+// andelKlar), but for the per-source PF-row "kvar" (GM/Mezz/ULC/PL09) that
+// Prognos.jsx's kbanaForecast redistributes across K-banor and shares with
+// Live.jsx as forecastKolli/forecastKart. A source that's barely started for
+// the day (small andelKlar) can blow up that source's kvar, which then
+// inflates remainWork for whichever lane draws heavily on it — producing an
+// implausible ETA in Live's "Klart vid nuv. takt" even while every other
+// number on screen looks fine. Callers should treat a source below this
+// floor as "not enough signal yet" (0 expected, not a guess) rather than
+// suppressing the whole forecast the way tooEarly/KART_MIN_ANDEL do.
+export const KALLA_MIN_ANDEL = 0.30;
