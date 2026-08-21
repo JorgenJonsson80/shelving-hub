@@ -8,7 +8,7 @@ import { fetchLedtidObservations } from "../shared/ledtidDb";
 import { useSetting } from "../shared/useSetting";
 import {
   KURVA, MIN_SAMPLES_VECKODAG, MIN_SAMPLES_POOLAD, MIN_SAMPLES_MANAD, KALLA_MIN_ANDEL,
-  dagenArKomplett, buildEmpiriskKurva, getAndelKlar, calcPrognos, calcKartongPrognos,
+  dagenArKomplett, buildEmpiriskKurva, getAndelKlar, calcPrognos, calcKartongPrognos, blendKvar,
 } from "../shared/prognosCurve";
 
 function toMin(str) {
@@ -106,12 +106,12 @@ export default function Prognos() {
     const veckodagDays = history.filter(d => new Date(d.datum + "T12:00:00").getDay() === todayWd);
 
     if (veckodagDays.length >= MIN_SAMPLES_VECKODAG) {
-      return { kurva: buildEmpiriskKurva(veckodagDays), tier: "veckodag", n: veckodagDays.length };
+      return { kurva: buildEmpiriskKurva(veckodagDays), tier: "veckodag", n: veckodagDays.length, days: veckodagDays };
     }
     if (history.length >= MIN_SAMPLES_POOLAD) {
-      return { kurva: buildEmpiriskKurva(history), tier: "poolad", n: history.length };
+      return { kurva: buildEmpiriskKurva(history), tier: "poolad", n: history.length, days: history };
     }
-    return { kurva: KURVA, tier: "fast", n: 0 };
+    return { kurva: KURVA, tier: "fast", n: 0, days: [] };
   }, [storedDays, todayData, now]);
 
   const handleFile = (f) => {
@@ -150,7 +150,17 @@ export default function Prognos() {
     // (parsePFExport) but otherwise unused. See calcKartongPrognos for why
     // this needs its own (higher) confidence floor than the PF-row estimate.
     const kartSett = todayData.rows?.reduce((s, r) => s + (r.labels || 0), 0) ?? 0;
-    const { estTotal: kartEstTotal, kvar: kartKvar } = calcKartongPrognos(andelKlarTotal, kartSett);
+    // Historical average day total for kartonger, from the same days used to
+    // build effectiveKurva — the reference blendKvar leans on below the
+    // confidence floor instead of returning nothing (see calcKartongPrognos).
+    const kartBaselineDays = effectiveKurva.days
+      .map(d => d.rows?.reduce((s, r) => s + (r.labels || 0), 0))
+      .filter(v => v > 0);
+    const kartBaselineTotal = kartBaselineDays.length
+      ? kartBaselineDays.reduce((s, v) => s + v, 0) / kartBaselineDays.length
+      : null;
+    const { estTotal: kartEstTotal, kvar: kartKvar, blended: kartBlended } =
+      calcKartongPrognos(andelKlarTotal, kartSett, kartBaselineTotal);
 
     const tooEarly   = nowHour < 7;
     const morningWarn = !tooEarly && nowHour < 8 && andelKlarTotal < 0.20;
@@ -163,7 +173,7 @@ export default function Prognos() {
       mezz: { sett: perKalla.Mezz, kvar: mezzProg.kvar, andelKlar: mezzProg.andelKlar },
       ulc:  { sett: perKalla.ULC,  kvar: ulcProg.kvar,  andelKlar: ulcProg.andelKlar },
       pl09: { sett: perKalla.PL09, kvar: pl09Prog.kvar, andelKlar: pl09Prog.andelKlar },
-      kartonger: { sett: kartSett, kvar: kartKvar, estTotal: kartEstTotal },
+      kartonger: { sett: kartSett, kvar: kartKvar, estTotal: kartEstTotal, blended: kartBlended },
       perTimme,
       tooEarly, morningWarn,
       kurvaTier: effectiveKurva.tier, kurvaN: effectiveKurva.n,
@@ -276,16 +286,18 @@ export default function Prognos() {
       }
     }
 
-    // Remaining per source from today's prognos — floored at KALLA_MIN_ANDEL
-    // (see prognosCurve.js) so a source that's barely started for the day
-    // doesn't get an amplified kvar redistributed onto a K-bana and passed to
-    // Live as forecastKolli/forecastKart. Treated as 0 (no signal yet)
-    // rather than trusting an inflated early guess.
+    // Remaining per source from today's prognos. Below KALLA_MIN_ANDEL (see
+    // prognosCurve.js) the raw sett/andelKlar guess isn't trusted on its own
+    // — blendKvar leans on that källa's historical baseline (from the same
+    // days effectiveKurva's curve was built from) instead, so a K-bana still
+    // gets a real forecasted-kvar redistributed to it early in the morning
+    // rather than 0 ("queue-only") until the källa crosses the floor.
+    const srcBaseline = effectiveKurva.kurva.baseline;
     const kvarSrc = {
-      GM:   forecast.gm.andelKlar   >= KALLA_MIN_ANDEL ? (forecast.gm.kvar   ?? 0) : 0,
-      Mezz: forecast.mezz.andelKlar >= KALLA_MIN_ANDEL ? (forecast.mezz.kvar ?? 0) : 0,
-      ULC:  forecast.ulc.andelKlar  >= KALLA_MIN_ANDEL ? (forecast.ulc.kvar  ?? 0) : 0,
-      PL09: forecast.pl09.andelKlar >= KALLA_MIN_ANDEL ? (forecast.pl09.kvar ?? 0) : 0,
+      GM:   blendKvar(forecast.gm.sett,   forecast.gm.andelKlar,   KALLA_MIN_ANDEL, srcBaseline?.GM),
+      Mezz: blendKvar(forecast.mezz.sett, forecast.mezz.andelKlar, KALLA_MIN_ANDEL, srcBaseline?.Mezz),
+      ULC:  blendKvar(forecast.ulc.sett,  forecast.ulc.andelKlar,  KALLA_MIN_ANDEL, srcBaseline?.ULC),
+      PL09: blendKvar(forecast.pl09.sett, forecast.pl09.andelKlar, KALLA_MIN_ANDEL, srcBaseline?.PL09),
     };
 
     // Median lead time per K-bana from real Ledtid.jsx observations (Supabase)
@@ -340,7 +352,7 @@ export default function Prognos() {
     }
 
     return result.sort((a, b) => b.estTotal - a.estTotal);
-  }, [forecast, nowHour, filterVeckodag, todayData, storedDays, ledtidObs]);
+  }, [forecast, nowHour, filterVeckodag, todayData, storedDays, ledtidObs, effectiveKurva]);
 
   // Shares today's per-K-bana expected-remaining with Live.jsx (same
   // app_settings mechanism as prognos_checkpoints) so its Buffert/Saldo can
@@ -609,6 +621,9 @@ export default function Prognos() {
                 <span style={{ fontSize: 11, color: C.dim }}>Sett {forecast.kartonger.sett}</span>
                 <span style={{ fontWeight: 700, color: C.textDim, fontVariantNumeric: "tabular-nums" }}>
                   ~{forecast.kartonger.kvar} kvar · ≈{forecast.kartonger.estTotal} totalt
+                  {forecast.kartonger.blended && (
+                    <span style={{ fontSize: 11, color: C.dim, fontWeight: 400, marginLeft: 4 }}>(tidig gissning)</span>
+                  )}
                 </span>
               </div>
             </Panel>

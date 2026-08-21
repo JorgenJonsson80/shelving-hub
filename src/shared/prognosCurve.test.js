@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { KURVA, getAndelKlar, calcPrognos, calcKartongPrognos, KART_MIN_ANDEL } from "./prognosCurve.js";
+import {
+  KURVA, getAndelKlar, calcPrognos, calcKartongPrognos, KART_MIN_ANDEL, KALLA_MIN_ANDEL,
+  blendKvar, buildEmpiriskKurva,
+} from "./prognosCurve.js";
 
 // ── getAndelKlar ──────────────────────────────────────────────────────────
 
@@ -89,5 +92,68 @@ describe("calcKartongPrognos", () => {
   it("never returns a negative kvar", () => {
     const { kvar } = calcKartongPrognos(1.0, 4000);
     expect(kvar).toBe(0);
+  });
+
+  it("blends toward a historical baseline below the confidence floor instead of returning nothing", () => {
+    // Same 7:30 scenario as the regression test above (andelKlar ≈ 0.13,
+    // sett 900) but now with a historical day-total (~4000, matching the
+    // "actual days land 3500–4500" report) to lean on — should produce a
+    // damped, plausible guess instead of null.
+    const res = calcKartongPrognos(0.13, 900, 4000);
+    expect(res.osäkert).toBe(false);
+    expect(res.blended).toBe(true);
+    expect(res.kvar).toBe(4367);
+    expect(res.estTotal).toBe(5267);
+    // Nowhere near the old unclamped 900/0.13 ≈ 6923 kvar this bug produced.
+    expect(res.kvar).toBeLessThan(900 / 0.13 - 900);
+  });
+});
+
+// ── blendKvar ─────────────────────────────────────────────────────────────
+
+describe("blendKvar", () => {
+  it("returns the pure historical-baseline guess at andelKlar 0", () => {
+    expect(blendKvar(200, 0, KALLA_MIN_ANDEL, 1000)).toBe(800);
+  });
+
+  it("matches the raw sett/andelKlar guess exactly at the confidence floor (continuity with calcPrognos)", () => {
+    // sett/andelKlar - sett = 300/0.3 - 300 = 700, same formula calcPrognos
+    // uses once a källa is trusted on its own.
+    expect(blendKvar(300, KALLA_MIN_ANDEL, KALLA_MIN_ANDEL, 1000)).toBe(700);
+  });
+
+  it("interpolates between baseline and live guess below the floor", () => {
+    // Halfway to the floor (andelKlar 0.15 of a 0.30 floor) should land
+    // halfway between the pure baseline guess and the pure live guess.
+    const result = blendKvar(100, 0.15, 0.3, 1000);
+    expect(result).toBeCloseTo(733.33, 1);
+  });
+
+  it("falls back to the old conservative 0 when there is no baseline to blend against", () => {
+    expect(blendKvar(500, 0.1, 0.3, null)).toBe(0);
+  });
+
+  it("falls back to the raw live guess above the floor when there is no baseline", () => {
+    expect(blendKvar(300, 0.5, 0.3, null)).toBe(300);
+  });
+});
+
+// ── buildEmpiriskKurva baseline ──────────────────────────────────────────
+
+describe("buildEmpiriskKurva baseline", () => {
+  it("averages each source's daily total across the given days", () => {
+    const days = [
+      { total: 100, perTimme: [], perKalla: { GM: 40 }, perTimmeKalla: { GM: [] } },
+      { total: 200, perTimme: [], perKalla: { GM: 80 }, perTimmeKalla: { GM: [] } },
+    ];
+    const kurva = buildEmpiriskKurva(days);
+    expect(kurva.baseline.TOTAL).toBe(150);
+    expect(kurva.baseline.GM).toBe(60);
+  });
+
+  it("returns null baseline for a source with no usable data", () => {
+    const days = [{ total: 100, perTimme: [], perKalla: {}, perTimmeKalla: {} }];
+    const kurva = buildEmpiriskKurva(days);
+    expect(kurva.baseline.GM).toBeNull();
   });
 });

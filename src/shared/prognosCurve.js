@@ -40,13 +40,15 @@ export function dagenArKomplett(day) {
 export function buildEmpiriskKurva(days) {
   const timmar = KURVA.timmar;
   const sources = ["GM", "Mezz", "ULC", "PL09", "TOTAL"];
-  const out = { timmar };
+  const out = { timmar, baseline: {} };
   for (const src of sources) {
     const perBucket = timmar.map(() => []);
+    const totals = [];
     for (const day of days) {
       const total  = src === "TOTAL" ? day.total   : day.perKalla?.[src];
       const hourly = src === "TOTAL" ? day.perTimme : day.perTimmeKalla?.[src];
       if (!total || !hourly) continue;
+      totals.push(total);
       let cum = 0;
       const cumByHour = hourly.map(v => (cum += v));
       timmar.forEach((h, i) => perBucket[i].push((cumByHour[h] / total) * 100));
@@ -54,6 +56,10 @@ export function buildEmpiriskKurva(days) {
     out[src] = perBucket.map((arr, i) =>
       arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : KURVA[src][i]
     );
+    // Average full-day total for this source across the same days used to
+    // build the % curve above — the historical reference point blendKvar
+    // leans on before a källa has enough of today's own signal to trust.
+    out.baseline[src] = totals.length ? totals.reduce((s, v) => s + v, 0) / totals.length : null;
   }
   return out;
 }
@@ -107,14 +113,47 @@ export function calcPrognos(kurva, kalla, sett, nowT) {
 // small andelKlar amplifies that mismatch heavily: at andelKlar 0.13 a
 // single delivery with an unusually high carton count gets blown up ~7.7x.
 // Bug report 2026-08-19: guessed 7000 kartonger around 7:30 when the day
-// landed at 3500–4500 (PF-row estimate was fine at the same moment). Require
-// the day to be far enough along before trusting the number at all.
+// landed at 3500–4500 (PF-row estimate was fine at the same moment). Below
+// this floor the raw sett/andelKlar guess isn't trusted on its own — see
+// blendKvar below, which leans on a historical baseline instead of just
+// returning nothing (2026-08-21: that "nothing" made Live's ETA silently
+// reduce to queue-only most mornings, which is the actual thing being fixed
+// here).
 export const KART_MIN_ANDEL = 0.30;
-export function calcKartongPrognos(andelKlarTotal, kartSett) {
-  if (andelKlarTotal < KART_MIN_ANDEL) return { estTotal: null, kvar: null, osäkert: true };
+export function calcKartongPrognos(andelKlarTotal, kartSett, baselineTotal = null) {
+  if (andelKlarTotal < KART_MIN_ANDEL) {
+    if (baselineTotal == null) return { estTotal: null, kvar: null, osäkert: true };
+    const kvar = Math.round(blendKvar(kartSett, andelKlarTotal, KART_MIN_ANDEL, baselineTotal));
+    return { estTotal: kartSett + kvar, kvar, osäkert: false, blended: true };
+  }
   const estTotal = Math.round(kartSett / andelKlarTotal);
   const kvar = Math.max(0, estTotal - kartSett);
   return { estTotal, kvar };
+}
+
+// Blends a live sett/andelKlar-based guess with a historical baseline total,
+// weighted by how far andelKlar is through the confidence floor (minAndel).
+// At andelKlar 0 → pure baseline guess ("assume today is a normal day and
+// subtract what's already arrived"). At andelKlar >= minAndel → pure live
+// guess, same number calcPrognos/calcKartongPrognos already produce past the
+// floor, so there's no jump the instant a källa crosses it. Replaces the old
+// on/off floor (0 below, live guess above) that made remainWork/ETA in
+// Live.jsx quietly collapse to "queue-only" for a big chunk of the morning —
+// GM in particular doesn't clear KALLA_MIN_ANDEL until ~08:15-08:30 most
+// days (see KURVA). Without a baseline (too little stored history site-wide
+// to have one yet) there's nothing to blend against, so it falls back to the
+// old conservative floor behavior.
+export function blendKvar(sett, andelKlar, minAndel, baselineTotal) {
+  if (baselineTotal == null) {
+    return andelKlar >= minAndel && andelKlar > 0 ? Math.max(0, sett / andelKlar - sett) : 0;
+  }
+  const baselineKvar = Math.max(0, baselineTotal - sett);
+  if (minAndel <= 0 || andelKlar >= minAndel) {
+    return andelKlar > 0 ? Math.max(0, sett / andelKlar - sett) : baselineKvar;
+  }
+  const weight = andelKlar / minAndel;
+  const liveKvar = andelKlar > 0 ? Math.max(0, sett / andelKlar - sett) : baselineKvar;
+  return weight * liveKvar + (1 - weight) * baselineKvar;
 }
 
 // Same amplification risk as KART_MIN_ANDEL above (estTotal = sett /
@@ -124,7 +163,9 @@ export function calcKartongPrognos(andelKlarTotal, kartSett) {
 // the day (small andelKlar) can blow up that source's kvar, which then
 // inflates remainWork for whichever lane draws heavily on it — producing an
 // implausible ETA in Live's "Klart vid nuv. takt" even while every other
-// number on screen looks fine. Callers should treat a source below this
-// floor as "not enough signal yet" (0 expected, not a guess) rather than
-// suppressing the whole forecast the way tooEarly/KART_MIN_ANDEL do.
+// number on screen looks fine. Callers should run a source below this floor
+// through blendKvar (with that källa's historical baseline) rather than
+// trusting the raw sett/andelKlar guess outright or, as before, treating it
+// as 0/no signal — see blendKvar's comment for why the latter made Live's
+// ETA read as queue-only for most of the morning.
 export const KALLA_MIN_ANDEL = 0.30;
