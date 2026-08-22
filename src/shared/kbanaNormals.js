@@ -8,8 +8,20 @@ import { supabase } from "./supabaseClient";
 const MIN_SAMPLES_VECKODAG = 5;
 const MIN_SAMPLES_POOLAD = 5;
 
+// historik_days grows one row/day forever; this only ever needs enough
+// same-weekday samples to clear MIN_SAMPLES_VECKODAG (5) — a 120-day
+// window gives ~17 occurrences of every weekday, comfortably above that
+// with room to spare. This is the default tab's on-mount fetch (Live.jsx),
+// so it was paying for the whole table's growth on nearly every session.
+const FETCH_WINDOW_DAYS = 120;
+
 export async function fetchHistorikDays() {
-  const { data, error } = await supabase.from("historik_days").select("date_str, rows");
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - FETCH_WINDOW_DAYS);
+  const { data, error } = await supabase
+    .from("historik_days")
+    .select("date_str, rows")
+    .gte("date_str", cutoff.toISOString().slice(0, 10));
   if (error) throw error;
   return data;
 }

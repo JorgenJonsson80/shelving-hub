@@ -20,8 +20,25 @@ function rowToObs(row) {
   };
 }
 
+// ledtid_observations is a row-per-observation event log — same shape as
+// pf_days, grows forever, never shrinks. Both call sites (Ledtid.jsx,
+// Prognos.jsx) only use it for kbanaStats()'s per-kbana average/median/
+// alarm-level, which is a rolling operational baseline, not a historical
+// record — recent performance is what an alarm threshold should reflect
+// anyway. Bounding this DOES change the computed numbers (average/median/
+// larmniva now reflect the last 120 days instead of all-time), unlike a
+// pagination fix that's purely about transfer size — matching pf_days'
+// existing window here for consistency rather than picking a new number.
+const FETCH_WINDOW_DAYS = 120;
+
 export async function fetchLedtidObservations() {
-  const { data, error } = await supabase.from("ledtid_observations").select("*").order("datum");
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - FETCH_WINDOW_DAYS);
+  const { data, error } = await supabase
+    .from("ledtid_observations")
+    .select("*")
+    .gte("datum", cutoff.toISOString().slice(0, 10))
+    .order("datum");
   if (error) throw error;
   return data.map(rowToObs);
 }
