@@ -123,4 +123,10 @@ describe("calcWork forecastKolli", () => {
     const plain = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8);
     expect(withNegative.remainWork).toBe(plain.remainWork);
   });
+
+  it("keeps queueWork forecast-free even when remainWork carries a forecast", () => {
+    const withForecast = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8, [], 20);
+    expect(withForecast.queueWork).toBeCloseTo(10 * 1.8);
+    expect(withForecast.queueWork).toBeLessThan(withForecast.remainWork);
+  });
 });

@@ -169,6 +169,17 @@ export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins
   const forecastKartKvar = Math.max(0, forecastKart || 0);
 
   const remainWork = (pafyllKvar + forecastKvar) * bastidMins + (kartKvar + forecastKartKvar) * KARTONG_MIN + pallKvar * 12;
+  // Queue only, no forecast — what "Klart vid nuv. takt" projects forward.
+  // remainWork above is deliberately forecast-inclusive (a shift-level "will
+  // today's expected volume fit" check, see Buffert), but forecastKvar/
+  // forecastKartKvar are PF/cartons Prognos expects to *arrive later today*,
+  // not stuff sitting in queue now. Projecting an ETA off remainWork treats
+  // that not-yet-arrived volume as if it were already queued and had to be
+  // cleared starting this instant, which produced absurd finish times (e.g.
+  // "01:15" with a handful of cartons actually in queue) — see 2026-08-24
+  // report. queueWork keeps the ETA meaning "at this pace, when do I clear
+  // what I can actually see right now."
+  const queueWork  = pafyllKvar * bastidMins + kartKvar * KARTONG_MIN + pallKvar * 12;
   const doneWork   = pafyllKlart * bastidMins + kartKlart * KARTONG_MIN + pallKlart * 12;
 
   const availMins = pers * remainH * 60;
@@ -177,7 +188,7 @@ export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins
   const spentMins = spentPersonMins(persHistory, bounds.startMins, nowMins, pers);
   const efficiency = spentMins > 3 ? (doneWork / spentMins) * 100 : null;
 
-  return { remainWork, doneWork, availMins, buffer, efficiency, remainH, elapsedH, endMins: bounds.endMins, forecastKvar, forecastKartKvar };
+  return { remainWork, queueWork, doneWork, availMins, buffer, efficiency, remainH, elapsedH, endMins: bounds.endMins, forecastKvar, forecastKartKvar };
 }
 
 export function fmtMins(mins) {

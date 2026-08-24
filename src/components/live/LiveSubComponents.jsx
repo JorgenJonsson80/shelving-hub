@@ -73,8 +73,11 @@ export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMi
   // `efficiency` above (doneWork / spentMins), just applied forward instead
   // of backward. Falls back to the assumed 100% rate until there's enough
   // elapsed time to measure an actual one.
+  // Uses queueWork (what's actually queued now), not remainWork (which also
+  // carries Prognos's expected-later-today volume) — see queueWork's comment
+  // in liveUtils.js for why mixing those produced nonsense finish times.
   const rate = pers * ((w.efficiency ?? 100) / 100);
-  const etaMins = w.remainWork > 0 && rate > 0 ? nowMins + w.remainWork / rate : null;
+  const etaMins = w.queueWork > 0 && rate > 0 ? nowMins + w.queueWork / rate : null;
   const etaLate = etaMins != null && w.endMins != null && etaMins > w.endMins;
 
   const normalTotal = normal ? Math.round(normal.kolli) : null;
