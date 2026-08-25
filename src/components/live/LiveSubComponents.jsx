@@ -68,16 +68,17 @@ export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMi
     : w.efficiency >= 70 ? "normalt tempo"
     : "lågt tempo";
 
-  // Projected finish time if the lane keeps its current pace: rate is
-  // work-minutes cleared per real minute, derived the same way as
-  // `efficiency` above (doneWork / spentMins), just applied forward instead
-  // of backward. Falls back to the assumed 100% rate until there's enough
-  // elapsed time to measure an actual one.
+  // Projected finish time at normal (100%) pace — deliberately ignores
+  // today's measured efficiency. Efficiency is noisy early in a shift and
+  // swings whenever bemanning changes mid-day (see spentPersonMins), so a
+  // pace-following ETA jumps around for reasons that have nothing to do
+  // with how much work is actually left. This is a stable target line —
+  // "when you SHOULD be done at rated capacity" — not a performance
+  // prediction; "Effektivitet" above already shows how today compares.
   // Uses queueWork (what's actually queued now), not remainWork (which also
   // carries Prognos's expected-later-today volume) — see queueWork's comment
   // in liveUtils.js for why mixing those produced nonsense finish times.
-  const rate = pers * ((w.efficiency ?? 100) / 100);
-  const etaMins = w.queueWork > 0 && rate > 0 ? nowMins + w.queueWork / rate : null;
+  const etaMins = w.queueWork > 0 ? nowMins + w.queueWork / pers : null;
   const etaLate = etaMins != null && w.endMins != null && etaMins > w.endMins;
 
   const normalTotal = normal ? Math.round(normal.kolli) : null;
@@ -116,7 +117,7 @@ export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMi
       )}
       {etaMins != null && (
         <div className="work-calc__item">
-          <span className="work-calc__lbl">Klart vid nuv. takt</span>
+          <span className="work-calc__lbl">Klart vid normal takt</span>
           <span className="work-calc__val" style={{ color: etaLate ? C.red : C.green }}>
             {fmtClock(etaMins)}{etaLate ? " (sent)" : ""}
           </span>
