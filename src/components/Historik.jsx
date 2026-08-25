@@ -120,6 +120,23 @@ function aggregateKbanaRows(days) {
   return out;
 }
 
+// Warehouse-wide daily totals (summed across every K-bana, then averaged per
+// day) — the same "vs föregående månad / vs totalt" idea as SnitCell below,
+// just one level up from per-K-bana to a single headline figure.
+function aggregateTotals(days) {
+  let kolli = 0, kart = 0, pall = 0, pers = 0;
+  for (const d of days) {
+    for (const r of d.rows) {
+      kolli += r.kolli;
+      kart += r.kart;
+      pall += r.helpall || 0;
+      pers += r.pers || 0;
+    }
+  }
+  const n = days.length || 1;
+  return { kolli: kolli / n, kart: kart / n, pall: pall / n, pers: pers / n, n: days.length };
+}
+
 function parseDailyFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -332,6 +349,33 @@ function SnitTabell({ agg, prevAgg, prevLabel, totalAgg }) {
   );
 }
 
+// Headline row above SnitTabell: total (all K-banor combined) daily average
+// for the selected month, same comparison chips as SnitCell.
+function TotalSnittRow({ totals, prevTotals, prevLabel, allTimeTotals }) {
+  const fields = ["kolli", "kart", "pall", "pers"];
+  return (
+    <MetricGrid columns={4}>
+      {fields.map(f => {
+        const v = totals[f];
+        const prev = prevTotals?.[f];
+        const tot = allTimeTotals?.[f];
+        const pctPrev = (prev != null && prev > 0) ? ((v - prev) / prev) * 100 : null;
+        const pctTotal = (tot != null && tot > 0) ? ((v - tot) / tot) * 100 : null;
+        return (
+          <MetricCard key={f} label={`SNITT ${f.toUpperCase()}/DAG`} value={Math.round(v)}>
+            {(pctPrev != null || pctTotal != null) && (
+              <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
+                {pctPrev != null && <DeltaChip pct={pctPrev} label={`vs ${prevLabel}`} />}
+                {pctTotal != null && <DeltaChip pct={pctTotal} label="vs totalt" />}
+              </div>
+            )}
+          </MetricCard>
+        );
+      })}
+    </MetricGrid>
+  );
+}
+
 export default function Historik() {
   const [history, setHistory] = useState({});
   const [loading, setLoading] = useState(true);
@@ -428,11 +472,26 @@ export default function Historik() {
 
   const prevMonthLabel = prevMonthKey ? MONTHS_SHORT[parseInt(prevMonthKey.split("-")[1], 10) - 1] : "";
 
+  const monthTotals = useMemo(() => {
+    if (!selMonth || !history[selMonth]) return null;
+    return aggregateTotals(Object.values(history[selMonth]));
+  }, [history, selMonth]);
+
+  const prevMonthTotals = useMemo(() => {
+    if (!prevMonthKey || !history[prevMonthKey]) return null;
+    return aggregateTotals(Object.values(history[prevMonthKey]));
+  }, [history, prevMonthKey]);
+
   // All-time average across every stored day, in every month — the
   // "totalsnitt" baseline.
   const totalAgg = useMemo(() => {
     const allDays = Object.values(history).flatMap(m => Object.values(m));
     return allDays.length ? aggregateKbanaRows(allDays) : null;
+  }, [history]);
+
+  const allTimeTotals = useMemo(() => {
+    const allDays = Object.values(history).flatMap(m => Object.values(m));
+    return allDays.length ? aggregateTotals(allDays) : null;
   }, [history]);
 
   const totalDays = Object.values(history).reduce((s, m) => s + Object.keys(m).length, 0);
@@ -582,6 +641,11 @@ export default function Historik() {
 
                 {view === "snitt" && monthAgg && (
                   <Panel key="snitt" title={"MÅNADSSNITT — " + fmtMonth(selMonth) + " (" + monthDays.length + " dagar)"} accent="blue" flush>
+                    {monthTotals && (
+                      <div style={{ padding: "14px 16px 4px" }}>
+                        <TotalSnittRow totals={monthTotals} prevTotals={prevMonthTotals} prevLabel={prevMonthLabel} allTimeTotals={allTimeTotals} />
+                      </div>
+                    )}
                     <SnitTabell agg={monthAgg} prevAgg={prevMonthAgg} prevLabel={prevMonthLabel} totalAgg={totalAgg} />
                   </Panel>
                 )}

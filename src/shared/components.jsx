@@ -67,11 +67,12 @@ export function MetricGrid({ children, columns = 4 }) {
   );
 }
 
-export function MetricCard({ label, value, tone }) {
+export function MetricCard({ label, value, tone, children }) {
   return (
     <div className="metric-card">
       <div className="metric-card__label">{label}</div>
       <div className="metric-card__value" style={tone ? { color: tone } : undefined}>{value}</div>
+      {children}
     </div>
   );
 }
