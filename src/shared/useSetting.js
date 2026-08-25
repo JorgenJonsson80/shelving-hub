@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 
 // Shared by Live.jsx (bemanning/pall/schedule/bastid/passes) and Raknare.jsx
@@ -40,7 +40,16 @@ export function useSetting(key, fallback) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  const setValue = (updater) => {
+  // Stable across renders (only changes if `key` does) — this is what a
+  // caller's setSomething function ends up being. An unmemoized version
+  // here caused a real production incident: a consumer put its setter in a
+  // useEffect dependency array, the effect called it, that triggered a
+  // state update, which produced a brand-new setValue reference next
+  // render, which the effect's deps saw as "changed" and fired again —
+  // forever, for as long as the app was open. That one loop accounted for
+  // ~15 million Supabase calls and >90% of this project's total database
+  // time before being traced back here.
+  const setValue = useCallback((updater) => {
     setLocalValue(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       supabase.from("app_settings")
@@ -48,7 +57,7 @@ export function useSetting(key, fallback) {
         .then(() => {});
       return next;
     });
-  };
+  }, [key]);
 
   return [value, setValue];
 }
