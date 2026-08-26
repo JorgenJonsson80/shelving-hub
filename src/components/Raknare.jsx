@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { C } from "../shared/theme";
-import { ActionButton, DataTable, Dropzone, PageHeader, Panel } from "../shared/components";
+import { ActionButton, Alert, DataTable, Dropzone, PageHeader, Panel } from "../shared/components";
 import { classifyLocation } from "../shared/liveUtils";
 import { useSetting } from "../shared/useSetting";
 
@@ -42,6 +42,7 @@ function DropLabel({ title, subtitle, onFile }) {
 }
 
 export default function Raknare() {
+  const [err, setErr] = useState(null);
   const [pallRaw, setPallRaw] = useState(null);
   const [locCol, setLocCol] = useSetting("e1_loc_col", "");
   const [vnrCol, setVnrCol] = useSetting("e1_vnr_col", "");
@@ -54,17 +55,19 @@ export default function Raknare() {
   const [userTextVisible, setUserTextVisible] = useState(false);
 
   const handlePallFile = (f) => {
+    setErr(null);
     readFile(f).then(buf => {
       const wb = XLSX.read(buf, { type: "array" });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-      if (!rows.length) return;
+      if (!rows.length) { setErr("Inga rader hittades i filen."); return; }
       setPallRaw({ rows, columns: Object.keys(rows[0]), total: rows.length });
       setManualK({});
-    }).catch(console.error);
+    }).catch(e => setErr(e.message));
   };
 
   const handleInfattningFile = (f) => {
+    setErr(null);
     readFile(f).then(buf => {
       const wb = XLSX.read(buf, { type: "array" });
 
@@ -93,8 +96,10 @@ export default function Raknare() {
               if (!kbana) continue;
               valid.push({ kollin: isNaN(kollin) ? 1 : kollin, typ, kbana });
             }
-            setInfattning({ rows: valid, total: rows.length });
-            return;
+            // Only commit to Format A if it actually produced rows — matched
+            // headers but zero valid rows silently produced an all-zero
+            // table before, instead of falling through to try Format B.
+            if (valid.length) { setInfattning({ rows: valid, total: rows.length }); return; }
           }
         }
       }
@@ -118,20 +123,22 @@ export default function Raknare() {
         if (!kbana) continue;
         valid.push({ kollin, typ, kbana });
       }
+      if (!valid.length) { setErr("Hittade inga giltiga rader — är det rätt Infattning-fil?"); return; }
       setInfattning({ rows: valid, total: rows.length });
-    }).catch(console.error);
+    }).catch(e => setErr(e.message));
   };
 
   const handleUserFile = (f) => {
+    setErr(null);
     readFile(f).then(buf => {
       const wb = XLSX.read(buf, { type: "array" });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-      if (!rows.length) return;
+      if (!rows.length) { setErr("Inga rader hittades i filen."); return; }
       const keys = Object.keys(rows[0]);
       const locKey = keys.find(k => /to\s*location/i.test(k));
       const userKey = keys.find(k => /butema\s*user/i.test(k));
-      if (!locKey || !userKey) return;
+      if (!locKey || !userKey) { setErr("Hittade inte kolumnerna To Location / Butema User — är det rätt fil?"); return; }
       const valid = rows.map(r => {
         const loc = String(r[locKey] || "").trim();
         const user = String(r[userKey] || "").trim();
@@ -139,8 +146,9 @@ export default function Raknare() {
         const kbana = classifyLocation(loc);
         return kbana ? { user, kbana } : null;
       }).filter(Boolean);
+      if (!valid.length) { setErr("Hittade inga giltiga rader att klassificera."); return; }
       setUserScan({ rows: valid, total: rows.length });
-    }).catch(console.error);
+    }).catch(e => setErr(e.message));
   };
 
   const pallRows = useMemo(() => {
@@ -244,6 +252,8 @@ export default function Raknare() {
         subtitle="Tre snabba verktyg för att räkna volym, scan-andel och bemanning från Excel-utdrag."
       />
 
+      {err && <Alert>{err}</Alert>}
+
       <div className="tool-grid">
 
         {/* ── PALLAR ── */}
@@ -254,12 +264,12 @@ export default function Raknare() {
             <>
               <div className="form-row">
                 <select value={locCol} onChange={e => setLocCol(e.target.value)}
-                  className="select-field">
+                  aria-label="Kolumn för lagerplats" className="select-field">
                   <option value="">Lagerplats...</option>
                   {pallRaw.columns.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
                 <select value={vnrCol} onChange={e => setVnrCol(e.target.value)}
-                  className="select-field">
+                  aria-label="Kolumn för VNR (valfritt)" className="select-field">
                   <option value="">VNR (valfritt)</option>
                   {pallRaw.columns.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
@@ -295,7 +305,7 @@ export default function Raknare() {
                     <div key={r.index} className="assignment-row">
                       <span>{r.vnr || r.to}</span>
                       <select value={manualK[r.index] || ""} onChange={e => setManualK({ ...manualK, [r.index]: e.target.value })}
-                        className="select-field select-field--compact">
+                        aria-label={`Välj K-bana för ${r.vnr || r.to}`} className="select-field select-field--compact">
                         <option value="">K-bana...</option>
                         {KBANA_LIST.map(k => <option key={k} value={k}>{k}</option>)}
                       </select>
