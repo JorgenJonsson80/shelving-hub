@@ -143,7 +143,11 @@ export default function Live() {
   const [staffErr,        setStaffErr]        = useState(null);
   const [manualBemanning, setManualBemanning] = useSetting("live_bemanning", {});
   const [bemanningHist,   setBemanningHist]   = useSetting("live_bemanning_hist", {});
-  const [prognosForecast]                     = useSetting("prognos_kbana_forecast", null);
+  // Polled (not just read once) — Prognos writes this on its own timer, and
+  // Live routinely mounts before Prognos has been opened at all this
+  // session, so a one-shot read would freeze Live's copy at whatever was
+  // last saved (often nothing, or yesterday's) for the rest of the session.
+  const [prognosForecast] = useSetting("prognos_kbana_forecast", null, { pollMs: 60_000 });
   const [manualPall,      setManualPall]      = useSetting("live_pall", {});
   const [schedule,        setSchedule]        = useSetting("live_schedule", {});
   const [bastidPerK,      setBastidPerK]      = useSetting("live_bastid", {});

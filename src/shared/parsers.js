@@ -9,8 +9,13 @@
 //  • Ankra raderna på "Total" (finns alltid) — I kö/På väg/Klart kan saknas
 //    när de är tomma och läses då som 0 istället för att banan försvinner.
 
-import * as XLSX from "xlsx";
 import { normKbana } from "./liveUtils";
+
+// xlsx (~120KB gzip) is dynamically imported inside each parse function
+// below instead of statically here — this module is imported by Live.jsx,
+// which (unlike the other 7 tabs) mounts on first page load, not lazily.
+// A static `import * as XLSX` here would pull the whole library into every
+// session's initial bundle even for users who never upload a file that day.
 
 const LABEL_RE = /^K-?(\d{2})(-\d+)?$/i;
 
@@ -206,8 +211,9 @@ export { parseLiveByLabel, normKbana };
 export function parseStaffingFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
+        const XLSX = await import("xlsx");
         const wb = XLSX.read(e.target.result, { type: "array" });
         const sheet = wb.Sheets["K-BANA"];
         if (!sheet) throw new Error("Ingen K-BANA-flik — är det rätt fil?");
@@ -233,8 +239,9 @@ export function parseStaffingFile(file) {
 export function parseLive(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
+        const XLSX = await import("xlsx");
         const wb = XLSX.read(e.target.result, { type: "array" });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const R = XLSX.utils.sheet_to_json(sheet, { defval: "", header: 1 });
@@ -301,8 +308,9 @@ export function parsePFExport(files) {
   const fileArr = Array.isArray(files) ? files : [files];
   return Promise.all(fileArr.map(file => new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
+        const XLSX = await import("xlsx");
         const wb = XLSX.read(e.target.result, { type: "array" });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
