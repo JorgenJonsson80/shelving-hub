@@ -189,7 +189,7 @@
 
 .time-input:focus {
   outline: none;
-  border-color: var(--border-2);
+  border-color: var(--accent);
 }
 
 .add-worker-btn {
@@ -338,7 +338,7 @@
 
 .pall-input:focus {
   outline: none;
-  border-color: var(--border-2);
+  border-color: var(--accent);
 }
 
 .pall-input::-webkit-outer-spin-button,

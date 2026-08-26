@@ -266,37 +266,37 @@ export default function Ledtid() {
         {formErr && <Alert>{formErr}</Alert>}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10, marginBottom: 12 }}>
           <div>
-            <label style={labelStyle}>K-BANA</label>
-            <select value={form.kbana} onChange={e => f("kbana", e.target.value)} style={inputStyle}>
+            <label style={labelStyle} htmlFor="ledtid-kbana">K-BANA</label>
+            <select id="ledtid-kbana" value={form.kbana} onChange={e => f("kbana", e.target.value)} style={inputStyle}>
               {KBANOR.map(kb => <option key={kb} value={kb}>{kb}</option>)}
             </select>
           </div>
           <div>
-            <label style={labelStyle}>SYSTEMTID (valfri)</label>
-            <input type="time" value={form.systemtid} onChange={e => f("systemtid", e.target.value)} style={inputStyle} />
+            <label style={labelStyle} htmlFor="ledtid-systemtid">SYSTEMTID (valfri)</label>
+            <input id="ledtid-systemtid" type="time" value={form.systemtid} onChange={e => f("systemtid", e.target.value)} style={inputStyle} />
           </div>
           <div>
-            <label style={labelStyle}>SKICKAD <span style={{ color: C.red }}>*</span></label>
-            <input type="time" value={form.skickad} onChange={e => f("skickad", e.target.value)} style={inputStyle} />
+            <label style={labelStyle} htmlFor="ledtid-skickad">SKICKAD <span style={{ color: C.red }}>*</span></label>
+            <input id="ledtid-skickad" type="time" value={form.skickad} onChange={e => f("skickad", e.target.value)} style={inputStyle} />
           </div>
           <div>
-            <label style={labelStyle}>KLAR <span style={{ color: C.red }}>*</span></label>
-            <input type="time" value={form.klar} onChange={e => f("klar", e.target.value)} style={inputStyle} />
+            <label style={labelStyle} htmlFor="ledtid-klar">KLAR <span style={{ color: C.red }}>*</span></label>
+            <input id="ledtid-klar" type="time" value={form.klar} onChange={e => f("klar", e.target.value)} style={inputStyle} />
           </div>
           <div>
-            <label style={labelStyle}>ANTAL KOLLI</label>
-            <input type="number" min="0" value={form.antalKolli} onChange={e => f("antalKolli", e.target.value)} placeholder="–" style={inputStyle} />
+            <label style={labelStyle} htmlFor="ledtid-antal-kolli">ANTAL KOLLI</label>
+            <input id="ledtid-antal-kolli" type="number" min="0" value={form.antalKolli} onChange={e => f("antalKolli", e.target.value)} placeholder="–" style={inputStyle} />
           </div>
           <div>
-            <label style={labelStyle}>ORSAK</label>
-            <select value={form.orsak} onChange={e => f("orsak", e.target.value)} style={inputStyle}>
+            <label style={labelStyle} htmlFor="ledtid-orsak">ORSAK</label>
+            <select id="ledtid-orsak" value={form.orsak} onChange={e => f("orsak", e.target.value)} style={inputStyle}>
               {ORSAKER.map(o => <option key={o} value={o}>{o || "–"}</option>)}
             </select>
           </div>
         </div>
         <div style={{ marginBottom: 12 }}>
-          <label style={labelStyle}>NOTERING</label>
-          <input type="text" value={form.notering} onChange={e => f("notering", e.target.value)} placeholder="Fritext…" style={{ ...inputStyle, width: "100%" }} />
+          <label style={labelStyle} htmlFor="ledtid-notering">NOTERING</label>
+          <input id="ledtid-notering" type="text" value={form.notering} onChange={e => f("notering", e.target.value)} placeholder="Fritext…" style={{ ...inputStyle, width: "100%" }} />
         </div>
 
         {/* Live preview of calculated times */}
@@ -338,6 +338,8 @@ export default function Ledtid() {
                   return (
                     <tr key={s.kbana}
                       onClick={() => setSelKbana(selKbana === s.kbana ? null : s.kbana)}
+                      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelKbana(selKbana === s.kbana ? null : s.kbana); } }}
+                      role="button" tabIndex={0} aria-pressed={selKbana === s.kbana}
                       style={{ cursor: "pointer", borderBottom: `1px solid ${C.border}`, background: selKbana === s.kbana ? C.panelRaised : "transparent" }}>
                       <td className="primary-cell" style={{ fontWeight: 700 }}>{s.kbana}</td>
                       <td className="is-right mono-cell" style={{ color: C.dim }}>{s.n}</td>

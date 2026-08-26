@@ -274,6 +274,8 @@ export default function Pafyllningsmonster() {
                       <Fragment key={r.kbana}>
                         <tr
                           onClick={() => setExpandedKb(expanded ? null : r.kbana)}
+                          onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpandedKb(expanded ? null : r.kbana); } }}
+                          role="button" tabIndex={0} aria-expanded={expanded}
                           style={{ cursor: "pointer", borderBottom: `1px solid ${C.border}` }}>
                           <td className="primary-cell" style={{ fontWeight: 700 }}>{r.kbana}</td>
                           <td style={{ textAlign: "right" }}>
