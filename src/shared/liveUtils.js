@@ -86,9 +86,12 @@ export function classifyLocation(loc) {
   return null;
 }
 
-export function readFlow(R, coords) {
-  const g = ([r, c]) => +R[r]?.[c] || 0;
-  return { iko: g(coords.iko), pavag: g(coords.pavag), klart: g(coords.klart), total: g(coords.total) };
+// "% above/below a baseline" — shared by every DeltaChip caller so the guard
+// (no divide-by-zero/negative-baseline surprises) only needs maintaining in
+// one place. Previously reimplemented independently at ~7 call sites across
+// Historik/Prognos/Brief/Live, each with its own slightly-different guard.
+export function pctDelta(value, base) {
+  return (base != null && base > 0) ? ((value - base) / base) * 100 : null;
 }
 
 export const normKbana = s => String(s).replace(/[-\s]/g, "").toUpperCase();
