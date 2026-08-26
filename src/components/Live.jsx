@@ -166,7 +166,8 @@ export default function Live() {
 
   const nowMins = now.getHours() * 60 + now.getMinutes();
   const todayDatum = now.toLocaleDateString("sv-SE");
-  const kbanaNormals = useMemo(() => buildKbanaNormals(historikDays, now.getDay()), [historikDays, now]);
+  const todayWeekday = now.getDay();
+  const kbanaNormals = useMemo(() => buildKbanaNormals(historikDays, todayWeekday), [historikDays, todayWeekday]);
 
   const getBastid = (kb) => bastidPerK[kb.kbana] ?? defaultBastid(kb);
   // Only trust the forecast if Prognos.jsx actually computed it today —

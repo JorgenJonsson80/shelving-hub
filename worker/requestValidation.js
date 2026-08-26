@@ -1,7 +1,11 @@
 export const AI_MODEL = "claude-sonnet-4-6";
 export const MAX_TOKENS = 1_000;
 export const MAX_MESSAGES = 4;
-export const MAX_MESSAGE_CHARS = 12_000;
+// Kept comfortably under index.js's MAX_BODY_BYTES (30_000) even at the
+// worst case (MAX_MESSAGES × MAX_MESSAGE_CHARS) — the outer byte-length
+// check is what actually enforces the limit, but these shouldn't imply a
+// larger allowance than that check would ever let through.
+export const MAX_MESSAGE_CHARS = 6_000;
 
 /**
  * Keep the public Worker a deliberately narrow endpoint. It accepts only the
