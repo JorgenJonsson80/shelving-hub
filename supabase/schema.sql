@@ -62,6 +62,14 @@ create table if not exists ledtid_observations (
   unique (kbana, skickad, klar, datum)
 );
 
+-- fetchLedtidObservations() (ledtidDb.js) queries `gte(datum, cutoff) order
+-- by datum` for its rolling window — unlike pf_days/historik_days, whose
+-- date column IS the primary key (a covering index for free), datum here is
+-- just a plain column with no index of its own until this. Invisible at
+-- today's row counts, but keeps the bounded-window query cheap as the table
+-- grows instead of falling back to a sequential scan + sort.
+create index if not exists ledtid_observations_datum_idx on ledtid_observations (datum);
+
 -- ── app_settings ─────────────────────────────────────────────────────────────
 -- Generic key/value table for the 7 "current setting" keys that don't need
 -- their own relational shape: Live.jsx's 5 keys (bemanning/pall/schedule/
