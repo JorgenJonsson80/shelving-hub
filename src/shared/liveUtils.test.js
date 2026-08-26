@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normKbana, classifyLocation, spentPersonMins, calcWork } from "./liveUtils.js";
+import { normKbana, classifyLocation, spentPersonMins, calcWork, pctDelta } from "./liveUtils.js";
 
 // ── normKbana ─────────────────────────────────────────────────────────────────
 
@@ -128,5 +128,21 @@ describe("calcWork forecastKolli", () => {
     const withForecast = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8, [], 20);
     expect(withForecast.queueWork).toBeCloseTo(10 * 1.8);
     expect(withForecast.queueWork).toBeLessThan(withForecast.remainWork);
+  });
+});
+
+// ── pctDelta ──────────────────────────────────────────────────────────────────
+
+describe("pctDelta", () => {
+  it("returns a signed percent above/below the baseline", () => {
+    expect(pctDelta(120, 100)).toBeCloseTo(20);
+    expect(pctDelta(80, 100)).toBeCloseTo(-20);
+  });
+
+  it("returns null for a missing or non-positive baseline", () => {
+    expect(pctDelta(100, null)).toBeNull();
+    expect(pctDelta(100, undefined)).toBeNull();
+    expect(pctDelta(100, 0)).toBeNull();
+    expect(pctDelta(100, -5)).toBeNull();
   });
 });

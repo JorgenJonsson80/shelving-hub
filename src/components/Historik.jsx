@@ -14,7 +14,7 @@ import {
   PrestBar,
 } from "../shared/components";
 import { parseDailyRows } from "../shared/parseDailyRows";
-import { rekommenderadBemanning } from "../shared/liveUtils";
+import { pctDelta, rekommenderadBemanning } from "../shared/liveUtils";
 
 const KBANA_ORDER = ["K51","K52","K53","K55","K56","K58","K59","K60","K61-7","K61-36","K62","K63"];
 // Old localStorage key — no longer written to, only read once for the
@@ -296,9 +296,8 @@ function DagTabell({ rows }) {
 // used for the volume columns (KOLLI/KART/PALL) where a bare average hides
 // whether today's month is unusually high or low.
 function SnitCell({ value, prevVal, totalVal, prevLabel }) {
-  const pctVs = (base) => (base != null && base > 0) ? ((value - base) / base) * 100 : null;
-  const pctPrev = pctVs(prevVal);
-  const pctTotal = pctVs(totalVal);
+  const pctPrev = pctDelta(value, prevVal);
+  const pctTotal = pctDelta(value, totalVal);
   return (
     <td className="is-right mono-cell">
       <div>{Math.round(value)}</div>
@@ -359,8 +358,8 @@ function TotalSnittRow({ totals, prevTotals, prevLabel, allTimeTotals }) {
         const v = totals[f];
         const prev = prevTotals?.[f];
         const tot = allTimeTotals?.[f];
-        const pctPrev = (prev != null && prev > 0) ? ((v - prev) / prev) * 100 : null;
-        const pctTotal = (tot != null && tot > 0) ? ((v - tot) / tot) * 100 : null;
+        const pctPrev = pctDelta(v, prev);
+        const pctTotal = pctDelta(v, tot);
         return (
           <MetricCard key={f} label={`SNITT ${f.toUpperCase()}/DAG`} value={Math.round(v)}>
             {(pctPrev != null || pctTotal != null) && (

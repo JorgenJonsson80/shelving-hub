@@ -1,7 +1,7 @@
 import { C } from "../../shared/theme";
 import { DeltaChip, Panel } from "../../shared/components";
 import {
-  calcWork, getShiftBounds, getWorkerStatus, fmtMins, fmtClock,
+  calcWork, getShiftBounds, getWorkerStatus, fmtMins, fmtClock, pctDelta,
 } from "../../shared/liveUtils";
 
 export function FlowBar({ iko, pavag, klart, total }) {
@@ -83,7 +83,7 @@ export function WorkCalc({ pafyll, kart, pallKvar, pallKlart, pers, sched, nowMi
 
   const normalTotal = normal ? Math.round(normal.kolli) : null;
   const todayTotal = pafyll?.total ?? 0;
-  const normalPct = normalTotal ? ((todayTotal - normalTotal) / normalTotal) * 100 : null;
+  const normalPct = pctDelta(todayTotal, normalTotal);
 
   return (
     <div className="work-calc">

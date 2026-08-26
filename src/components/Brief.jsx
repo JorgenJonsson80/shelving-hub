@@ -17,7 +17,7 @@ import {
 } from "../shared/components";
 import { parseDailyRows } from "../shared/parseDailyRows";
 import { callAI } from "../shared/api";
-import { rekommenderadBemanning } from "../shared/liveUtils";
+import { pctDelta, rekommenderadBemanning } from "../shared/liveUtils";
 import { fetchHistorikDays, buildKbanaNormals } from "../shared/kbanaNormals";
 
 const MONTH_MAP = { jan:1,feb:2,mar:3,apr:4,maj:5,jun:6,jul:7,aug:8,sep:9,okt:10,nov:11,dec:12 };
@@ -225,8 +225,8 @@ export default function Brief() {
                   const rekBem = rekommenderadBemanning(r.kbana, r.kolli, r.kart, r.helpall);
                   const rekColor = r.pers >= rekBem ? C.green : r.pers >= rekBem * 0.9 ? C.yellow : C.red;
                   const normal = kbanaNormals[r.kbana];
-                  const kolliPct = normal?.n >= 3 && normal.kolli > 0 ? ((r.kolli - normal.kolli) / normal.kolli) * 100 : null;
-                  const kartPct  = normal?.n >= 3 && normal.kart  > 0 ? ((r.kart  - normal.kart)  / normal.kart)  * 100 : null;
+                  const kolliPct = normal?.n >= 3 ? pctDelta(r.kolli, normal.kolli) : null;
+                  const kartPct  = normal?.n >= 3 ? pctDelta(r.kart,  normal.kart)  : null;
                   return (
                     <tr key={i}>
                       <td className="primary-cell">{r.kbana}</td>

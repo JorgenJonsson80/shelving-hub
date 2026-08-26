@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { C } from "../shared/theme";
 import { Alert, DeltaChip, Dropzone, Panel } from "../shared/components";
 import { parsePFExport } from "../shared/parsers";
-import { classifyLocation } from "../shared/liveUtils";
+import { classifyLocation, pctDelta } from "../shared/liveUtils";
 import { fetchPfDays, upsertPfDay } from "../shared/pfDaysDb";
 import { fetchLedtidObservations } from "../shared/ledtidDb";
 import { useSetting } from "../shared/useSetting";
@@ -335,7 +335,8 @@ export default function Prognos() {
       const today = todayKbMap[kb] || 0;
       const estTotal = today + Math.round(exp);
       const monthAvg = monthAvgByKb[kb] ?? null;
-      const vsMonthAvg = monthAvg ? Math.round(((estTotal - monthAvg) / monthAvg) * 100) : null;
+      const monthDeltaPct = pctDelta(estTotal, monthAvg);
+      const vsMonthAvg = monthDeltaPct != null ? Math.round(monthDeltaPct) : null;
 
       // Expected remaining cartons for this K-bana: this K-bana's expected
       // remaining PF-rows (exp, above) times its own historical labels-per-
@@ -563,7 +564,8 @@ export default function Prognos() {
                   <div style={{ fontSize: 11, color: C.dim, marginBottom: 8 }}>Tidigare sparade gissningar vs. facit:</div>
                   {facit.map(f => {
                     const wd = VECKODAGAR[new Date(f.datum + "T12:00:00").getDay()];
-                    const pctOff = f.estTotal ? Math.round(((f.actual - f.estTotal) / f.estTotal) * 100) : null;
+                    const rawPctOff = pctDelta(f.actual, f.estTotal);
+                    const pctOff = rawPctOff != null ? Math.round(rawPctOff) : null;
                     return (
                       <div key={f.datum} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "7px 0", borderBottom: `1px solid ${C.border}`, fontSize: 12, flexWrap: "wrap" }}>
                         <span style={{ color: C.textDim, flexShrink: 0 }}>{wd} {f.datum.slice(5)} · kl {fmtHM(f.mins)}</span>
