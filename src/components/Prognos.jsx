@@ -24,6 +24,14 @@ function fmtHM(mins) {
 
 const VECKODAGAR = ["Sön","Mån","Tis","Ons","Tor","Fre","Lör"];
 
+// Fast identitetsfärg per källa — samma dot+textfärg varhelst källan visas,
+// så man känner igen GM/Mezz/ULC/PL09 på färgen istället för att läsa texten.
+const KALLA_COLOR = { GM: C.green, Mezz: C.red, ULC: C.blue, PL09: C.yellow };
+
+function KallaDot({ color }) {
+  return <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: color, marginRight: 7 }} />;
+}
+
 function meanStd(values) {
   const n = values.length;
   if (n < 2) return null;
@@ -585,7 +593,8 @@ export default function Prognos() {
               {/* GM — with range */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${C.border}` }}>
                 <div>
-                  <span style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>GM</span>
+                  <KallaDot color={KALLA_COLOR.GM} />
+                  <span style={{ fontWeight: 700, color: KALLA_COLOR.GM, fontSize: 13 }}>GM</span>
                   <span style={{ fontSize: 11, color: C.dim, marginLeft: 8 }}>Godsmottagning · sett {forecast.gm.sett}</span>
                 </div>
                 {forecast.gm.kvar != null
@@ -605,7 +614,8 @@ export default function Prognos() {
               ].map(({ id, label, sett, kvar }) => (
                 <div key={id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${C.border}` }}>
                   <div>
-                    <span style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{label}</span>
+                    <KallaDot color={KALLA_COLOR[label]} />
+                    <span style={{ fontWeight: 700, color: KALLA_COLOR[label], fontSize: 13 }}>{label}</span>
                     <span style={{ fontSize: 11, color: C.dim, marginLeft: 8 }}>sett {sett}</span>
                   </div>
                   {kvar != null
