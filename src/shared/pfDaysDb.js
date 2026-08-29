@@ -27,14 +27,38 @@ function rowToDay(row) {
 // window trims that cost with room to spare for every existing use.
 const FETCH_WINDOW_DAYS = 120;
 
+// Prognos.jsx and Pafyllningsmonster.jsx both call fetchPfDays() independently
+// on mount, and refetch after every upload — on the heaviest table in the app
+// (1500-2000+ rows/day), so visiting both tabs in one session paid for this
+// window twice. Caching the in-flight/resolved promise means the second
+// caller reuses the first's fetch instead of re-hitting the network; any
+// write invalidates it so the next read is fresh. Callers get a shallow
+// array copy so neither can mutate the shared cached array out from under
+// the other (the row objects inside are still shared, same as before —
+// nothing here mutates a day's own fields in place).
+let cachedPromise = null;
+
 export async function fetchPfDays() {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - FETCH_WINDOW_DAYS);
-  const { data, error } = await supabase.from("pf_days").select("*")
-    .gte("datum", cutoff.toISOString().slice(0, 10))
-    .order("datum");
-  if (error) throw error;
-  return data.map(rowToDay);
+  if (!cachedPromise) {
+    cachedPromise = (async () => {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - FETCH_WINDOW_DAYS);
+      const { data, error } = await supabase.from("pf_days").select("*")
+        .gte("datum", cutoff.toISOString().slice(0, 10))
+        .order("datum");
+      if (error) throw error;
+      return data.map(rowToDay);
+    })().catch((error) => {
+      cachedPromise = null;
+      throw error;
+    })
+  }
+  const days = await cachedPromise;
+  return [...days];
+}
+
+function invalidatePfDaysCache() {
+  cachedPromise = null;
 }
 
 export async function upsertPfDay(d) {
@@ -48,11 +72,13 @@ export async function upsertPfDay(d) {
     updated_at: new Date().toISOString(),
   });
   if (error) throw error;
+  invalidatePfDaysCache();
 }
 
 export async function deleteAllPfDays() {
   const { error } = await supabase.from("pf_days").delete().not("datum", "is", null);
   if (error) throw error;
+  invalidatePfDaysCache();
 }
 
 // One-time migration helper — merges the two old localStorage keys into the

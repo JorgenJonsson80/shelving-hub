@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { C } from "../shared/theme";
 import { supabase } from "../shared/supabaseClient";
+import { invalidateHistorikDaysCache } from "../shared/kbanaNormals";
 import {
   ActionButton,
   BedomingPill,
@@ -57,16 +58,19 @@ async function upsertDay(d) {
     updated_at: new Date().toISOString(),
   });
   if (error) throw error;
+  invalidateHistorikDaysCache();
 }
 
 async function deleteDay(dateStr) {
   const { error } = await supabase.from("historik_days").delete().eq("date_str", dateStr);
   if (error) throw error;
+  invalidateHistorikDaysCache();
 }
 
 async function deleteAllDays() {
   const { error } = await supabase.from("historik_days").delete().not("date_str", "is", null);
   if (error) throw error;
+  invalidateHistorikDaysCache();
 }
 
 function getLatestSelection(h) {

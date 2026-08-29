@@ -31,16 +31,35 @@ function rowToObs(row) {
 // existing window here for consistency rather than picking a new number.
 const FETCH_WINDOW_DAYS = 120;
 
+// Ledtid.jsx and Prognos.jsx both call fetchLedtidObservations() independently
+// on mount — caching the in-flight/resolved promise means the second caller
+// reuses the first's fetch instead of re-hitting the network. Any write
+// invalidates it so the next read reflects the change.
+let cachedPromise = null;
+
 export async function fetchLedtidObservations() {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - FETCH_WINDOW_DAYS);
-  const { data, error } = await supabase
-    .from("ledtid_observations")
-    .select("*")
-    .gte("datum", cutoff.toISOString().slice(0, 10))
-    .order("datum");
-  if (error) throw error;
-  return data.map(rowToObs);
+  if (!cachedPromise) {
+    cachedPromise = (async () => {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - FETCH_WINDOW_DAYS);
+      const { data, error } = await supabase
+        .from("ledtid_observations")
+        .select("*")
+        .gte("datum", cutoff.toISOString().slice(0, 10))
+        .order("datum");
+      if (error) throw error;
+      return data.map(rowToObs);
+    })().catch((error) => {
+      cachedPromise = null;
+      throw error;
+    })
+  }
+  const obs = await cachedPromise;
+  return [...obs];
+}
+
+function invalidateLedtidCache() {
+  cachedPromise = null;
 }
 
 export async function insertLedtidObservation(o) {
@@ -60,10 +79,12 @@ export async function insertLedtidObservation(o) {
     notering: o.notering,
   }).select().single();
   if (error) throw error;
+  invalidateLedtidCache();
   return rowToObs(data);
 }
 
 export async function deleteLedtidObservation(id) {
   const { error } = await supabase.from("ledtid_observations").delete().eq("id", id);
   if (error) throw error;
+  invalidateLedtidCache();
 }

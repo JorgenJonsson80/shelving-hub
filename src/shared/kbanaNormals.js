@@ -15,15 +15,36 @@ const MIN_SAMPLES_POOLAD = 5;
 // so it was paying for the whole table's growth on nearly every session.
 const FETCH_WINDOW_DAYS = 120;
 
+// Live.jsx and Brief.jsx both call fetchHistorikDays() independently on
+// mount — caching the in-flight/resolved promise means the second caller
+// reuses the first's fetch instead of re-hitting the network. Historik.jsx
+// writes to historik_days (import/delete) in a different module, so it
+// calls invalidateHistorikDaysCache() after every write to keep this from
+// serving stale data for the rest of the session.
+let cachedPromise = null;
+
 export async function fetchHistorikDays() {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - FETCH_WINDOW_DAYS);
-  const { data, error } = await supabase
-    .from("historik_days")
-    .select("date_str, rows")
-    .gte("date_str", cutoff.toISOString().slice(0, 10));
-  if (error) throw error;
-  return data;
+  if (!cachedPromise) {
+    cachedPromise = (async () => {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - FETCH_WINDOW_DAYS);
+      const { data, error } = await supabase
+        .from("historik_days")
+        .select("date_str, rows")
+        .gte("date_str", cutoff.toISOString().slice(0, 10));
+      if (error) throw error;
+      return data;
+    })().catch((error) => {
+      cachedPromise = null;
+      throw error;
+    })
+  }
+  const days = await cachedPromise;
+  return [...days];
+}
+
+export function invalidateHistorikDaysCache() {
+  cachedPromise = null;
 }
 
 // Returns { [kbana]: { kolli, kart, helpall, n, tier } } — average day
