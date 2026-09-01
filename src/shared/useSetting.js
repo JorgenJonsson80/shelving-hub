@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./supabaseClient";
 
 // Shared by Live.jsx (bemanning/pall/schedule/bastid/passes) and Raknare.jsx
@@ -23,8 +23,16 @@ import { supabase } from "./supabaseClient";
 // it off (default) for settings only ever changed by the same tab that
 // reads them — polling those would risk clobbering an in-flight local edit
 // with a stale server read.
-export function useSetting(key, fallback, { pollMs } = {}) {
+//
+// `debounceMs` (optional) delays the Supabase write (not the local state
+// update, which stays instant) — for settings driven by a plain number/text
+// input, where every keystroke was otherwise firing its own write (e.g.
+// typing "150" into a pers field wrote 1, then 15, then 150). Coalesces
+// rapid-fire updates into one write after the user pauses. A pending write
+// is flushed immediately on unmount so a quick tab-switch doesn't drop it.
+export function useSetting(key, fallback, { pollMs, debounceMs } = {}) {
   const [value, setLocalValue] = useState(fallback);
+  const pendingWrite = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +72,17 @@ export function useSetting(key, fallback, { pollMs } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, pollMs]);
 
+  useEffect(() => {
+    return () => {
+      if (!pendingWrite.current) return;
+      clearTimeout(pendingWrite.current.timeoutId);
+      supabase.from("app_settings")
+        .upsert({ key, value: pendingWrite.current.value, updated_at: new Date().toISOString() })
+        .then(() => {});
+      pendingWrite.current = null;
+    };
+  }, [key]);
+
   // Stable across renders (only changes if `key` does) — this is what a
   // caller's setSomething function ends up being. An unmemoized version
   // here caused a real production incident: a consumer put its setter in a
@@ -76,12 +95,21 @@ export function useSetting(key, fallback, { pollMs } = {}) {
   const setValue = useCallback((updater) => {
     setLocalValue(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      supabase.from("app_settings")
-        .upsert({ key, value: next, updated_at: new Date().toISOString() })
-        .then(() => {});
+      const write = () => {
+        supabase.from("app_settings")
+          .upsert({ key, value: next, updated_at: new Date().toISOString() })
+          .then(() => {});
+        pendingWrite.current = null;
+      };
+      if (debounceMs) {
+        if (pendingWrite.current) clearTimeout(pendingWrite.current.timeoutId);
+        pendingWrite.current = { timeoutId: setTimeout(write, debounceMs), value: next };
+      } else {
+        write();
+      }
       return next;
     });
-  }, [key]);
+  }, [key, debounceMs]);
 
   return [value, setValue];
 }
