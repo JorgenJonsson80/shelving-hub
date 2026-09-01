@@ -42,6 +42,42 @@ function meanStd(values) {
 
 const MIN_SAMPLES = 4;
 const Z_THRESHOLD = 2;
+const MIN_FACIT_SAMPLES = 3;
+
+function computeKbanaAccuracy(checkpoints, storedDays, todayDatum) {
+  const byKb = {};
+  for (const [datum, cp] of Object.entries(checkpoints)) {
+    if (datum === todayDatum || !cp.byKb) continue;
+    const day = storedDays.find(d => d.datum === datum);
+    if (!day || !dagenArKomplett(day)) continue;
+    const actual = perKbanaStats(day.rows);
+    for (const [kb, est] of Object.entries(cp.byKb)) {
+      const act = actual[kb]?.total || 0;
+      if (act === 0 && est === 0) continue;
+      const pctOff = act > 0 ? (Math.abs(est - act) / act) * 100 : 100;
+      if (!byKb[kb]) byKb[kb] = [];
+      byKb[kb].push(pctOff);
+    }
+  }
+  const out = {};
+  for (const [kb, vals] of Object.entries(byKb)) {
+    if (vals.length < MIN_FACIT_SAMPLES) continue;
+    out[kb] = { avgOff: vals.reduce((s, v) => s + v, 0) / vals.length, n: vals.length };
+  }
+  return out;
+}
+
+function AccuracyChip({ avgOff, n }) {
+  const color = avgOff <= 10 ? C.green : avgOff <= 20 ? C.yellow : C.red;
+  return (
+    <span
+      title={`Snitt avvikelse mot facit, senaste ${n} spårade dagarna`}
+      style={{ fontSize: 10, fontWeight: 700, color, border: `1px solid ${color}55`, background: color + "18", borderRadius: 5, padding: "2px 6px", whiteSpace: "nowrap" }}
+    >
+      ±{avgOff.toFixed(0)}% ({n}d)
+    </span>
+  );
+}
 
 // Per K-bana: total PF that day + count per källa, for one historical day's rows.
 function perKbanaStats(rows) {
@@ -190,20 +226,6 @@ export default function Prognos() {
 
   const todayCheckpoint = todayData ? checkpoints[todayData.datum] : null;
 
-  const saveCheckpoint = () => {
-    if (!todayData || !forecast) return;
-    setCheckpoints(prev => ({
-      ...prev,
-      [todayData.datum]: {
-        mins: now.getHours() * 60 + now.getMinutes(),
-        sett: forecast.sett,
-        estTotal: forecast.totalEst,
-        kartSett: forecast.kartonger.sett,
-        kartEstTotal: forecast.kartonger.estTotal,
-      },
-    }));
-  };
-
   // Past saved guesses vs. the actual final total, once that day's stored
   // record looks complete (dagenArKomplett) — comparing against a still-
   // partial day would make an accurate guess look like a miss.
@@ -218,6 +240,7 @@ export default function Prognos() {
     return out.sort((a, b) => b.datum.localeCompare(a.datum)).slice(0, 8);
   }, [checkpoints, storedDays, todayData]);
 
+  const kbanaAccuracy = computeKbanaAccuracy(checkpoints, storedDays, todayData?.datum);
   const kbanaForecast = useMemo(() => {
     if (!forecast || forecast.tooEarly) return null;
 
@@ -362,6 +385,21 @@ export default function Prognos() {
 
     return result.sort((a, b) => b.estTotal - a.estTotal);
   }, [forecast, nowHour, filterVeckodag, todayData, storedDays, ledtidObs, effectiveKurva]);
+
+  const saveCheckpoint = () => {
+    if (!todayData || !forecast) return;
+    setCheckpoints(prev => ({
+      ...prev,
+      [todayData.datum]: {
+        mins: now.getHours() * 60 + now.getMinutes(),
+        sett: forecast.sett,
+        estTotal: forecast.totalEst,
+        kartSett: forecast.kartonger.sett,
+        kartEstTotal: forecast.kartonger.estTotal,
+        byKb: kbanaForecast ? Object.fromEntries(kbanaForecast.map(k => [k.kb, k.estTotal])) : {},
+      },
+    }));
+  };
 
   // Shares today's per-K-bana expected-remaining with Live.jsx (same
   // app_settings mechanism as prognos_checkpoints) so its Buffert/Saldo can
@@ -557,7 +595,7 @@ export default function Prognos() {
                   {todayCheckpoint
                     ? <>Sparad kl {fmtHM(todayCheckpoint.mins)}: <strong style={{ color: C.text }}>~{todayCheckpoint.estTotal} PF</strong> (utifrån {todayCheckpoint.sett} sett)
                         {todayCheckpoint.kartEstTotal != null && <> · ~{todayCheckpoint.kartEstTotal} kartonger</>}</>
-                    : <>Spara nuvarande gissning (~{forecast.totalEst} PF) så du kan se hur den stämde när dagen är slut.</>}
+                    : <>Spara nuvarande gissning (~{forecast.totalEst} PF, inkl. per K-bana) så du kan se hur den stämde när dagen är slut.</>}
                 </div>
                 <button
                   onClick={saveCheckpoint}
@@ -690,6 +728,9 @@ export default function Prognos() {
                       {k.monthAvg != null && (
                         <DeltaChip pct={k.vsMonthAvg} label={`vs snitt ${Math.round(k.monthAvg)}`} />
                       )}
+                      {kbanaAccuracy[k.kb] && (
+                        <AccuracyChip avgOff={kbanaAccuracy[k.kb].avgOff} n={kbanaAccuracy[k.kb].n} />
+                      )}
                     </div>
                   </div>
                   <HourBar perTimme={k.timme} highlight={k.timme[k.topp] > 0 ? [k.topp, k.topp] : null} />
@@ -735,10 +776,13 @@ export default function Prognos() {
                           <strong style={{ color: count >= 5 ? C.red : C.yellow }}>×{count}</strong>
                         </div>
                         {(vnrs.length > 0 || kallor.length > 0) && (
-                          <div style={{ fontSize: 10, color: C.dim, marginTop: 2 }}>
-                            {vnrs.length > 0 && <>VNR {vnrs.join(", ")}</>}
-                            {vnrs.length > 0 && kallor.length > 0 && " · "}
-                            {kallor.join(", ")}
+                          <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, fontSize: 10, color: C.dim, marginTop: 3 }}>
+                            {vnrs.length > 0 && <span>VNR {vnrs.join(", ")}</span>}
+                            {kallor.map(k => (
+                              <span key={k} style={{ display: "inline-flex", alignItems: "center", color: KALLA_COLOR[k] || C.dim, fontWeight: 700 }}>
+                                <KallaDot color={KALLA_COLOR[k] || C.dim} />{k}
+                              </span>
+                            ))}
                           </div>
                         )}
                       </div>
