@@ -15,7 +15,12 @@ import {
   PrestBar,
 } from "../shared/components";
 import { parseDailyRows } from "../shared/parseDailyRows";
-import { pctDelta, rekommenderadBemanning } from "../shared/liveUtils";
+import { pctDelta, rekommenderadBemanning, rekommenderadBemanningBreakdown } from "../shared/liveUtils";
+
+// Fixed categorical colors for the bemanning-breakdown bars — kept separate
+// from green/red since those already mean "över/under bemannat" elsewhere
+// in this same tab (SnitTabell/DagTabell's REK. BEM. column).
+const BEMANNING_COLOR = { kolli: C.blue, kart: C.yellow, pall: C.accent };
 
 const KBANA_ORDER = ["K51","K52","K53","K55","K56","K58","K59","K60","K61-7","K61-36","K62","K63"];
 // Old localStorage key — no longer written to, only read once for the
@@ -352,6 +357,123 @@ function SnitTabell({ agg, prevAgg, prevLabel, totalAgg }) {
   );
 }
 
+function BemanningLegend() {
+  const items = [
+    ["kolli", "Kolli"],
+    ["kart", "Kartong"],
+    ["pall", "Pall"],
+  ];
+  return (
+    <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11, color: C.dim, marginBottom: 14 }}>
+      {items.map(([k, l]) => (
+        <span key={k} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 2, background: BEMANNING_COLOR[k], display: "inline-block" }} />
+          {l}
+        </span>
+      ))}
+      <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <span style={{ width: 2, height: 10, background: C.white, display: "inline-block", borderRadius: 1 }} />
+        Faktiskt bemannat (snitt)
+      </span>
+    </div>
+  );
+}
+
+// Horizontal stacked bar: length = rekommenderad bemanning (scaled against
+// the shared `max` across all K-banor in the current view, so bars stay
+// comparable), segments = kolli/kart/pall's respective person-contribution.
+// A thin vertical tick marks the actual average bemanning for comparison.
+function RekBemBar({ breakdown, actual, max, width = 200 }) {
+  const { kolliPers, kartPers, pallPers, total } = breakdown;
+  const barWidth = max > 0 ? (total / max) * width : 0;
+  const actualX = actual != null && max > 0 ? Math.min(width, (actual / max) * width) : null;
+  const segs = [
+    { key: "kolli", label: "Kolli", val: kolliPers },
+    { key: "kart", label: "Kartong", val: kartPers },
+    { key: "pall", label: "Pall", val: pallPers },
+  ];
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ position: "relative", width, height: 14, background: C.border, borderRadius: 4, flexShrink: 0 }}>
+        <div
+          title={segs.map(s => `${s.label}: ${s.val.toFixed(2)} pers`).join(" · ")}
+          style={{ display: "flex", height: "100%", width: barWidth, borderRadius: 4, overflow: "hidden", gap: 1 }}
+        >
+          {segs.map(s => (total > 0 && s.val > 0) ? (
+            <div key={s.key} style={{ width: `${(s.val / total) * 100}%`, background: BEMANNING_COLOR[s.key] }} />
+          ) : null)}
+        </div>
+        {actualX != null && (
+          <div
+            title={`Faktiskt bemannat i snitt: ${actual.toFixed(1)}`}
+            style={{ position: "absolute", left: actualX - 1, top: -3, width: 2, height: 20, background: C.white, borderRadius: 1 }}
+          />
+        )}
+      </div>
+      <span className="mono-cell" style={{ fontWeight: 700, color: C.text, minWidth: 30 }}>{total.toFixed(1)}</span>
+    </div>
+  );
+}
+
+// Visual view: recommended bemanning per K-bana, either for the currently
+// selected period (selMonth) or pooled across all stored history — toggle
+// between the two, per Jörgens ask ("antingen all historik eller vald
+// historik"). Unrounded (toFixed(1), not Math.round) since a "1.4" vs "1.0"
+// distinction is exactly the point.
+function BemanningView({ periodAgg, periodLabel, allAgg, allLabel }) {
+  const [scope, setScope] = useState("period");
+  const active = scope === "period" ? periodAgg : allAgg;
+
+  const rows = useMemo(() => {
+    if (!active) return [];
+    return KBANA_ORDER.filter(k => active[k]).map(k => {
+      const r = active[k];
+      return { kbana: k, breakdown: rekommenderadBemanningBreakdown(k, r.ko, r.ka, r.pall), actual: r.pers, n: r.n };
+    });
+  }, [active]);
+
+  const max = Math.max(...rows.map(r => r.breakdown.total), ...rows.map(r => r.actual), 0.1);
+
+  return (
+    <div key="bemanning" className="anim-fade-up">
+      <div className="form-row">
+        <button
+          className={"historik__snitt-btn" + (scope === "period" ? " is-active" : "")}
+          onClick={() => setScope("period")}
+          disabled={!periodAgg}
+        >
+          {periodLabel}
+        </button>
+        <button
+          className={"historik__snitt-btn" + (scope === "all" ? " is-active" : "")}
+          onClick={() => setScope("all")}
+          disabled={!allAgg}
+        >
+          {allLabel}
+        </button>
+      </div>
+      <Panel title="REKOMMENDERAD BEMANNING PER K-BANA" accent="blue" flush>
+        <div style={{ padding: "16px 16px 4px" }}>
+          {!rows.length ? (
+            <div style={{ color: C.dim, fontSize: 12 }}>Ingen data för vald period.</div>
+          ) : (
+            <>
+              <BemanningLegend />
+              {rows.map(r => (
+                <div key={r.kbana} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                  <span className="mono-cell" style={{ width: 56, fontWeight: 700, color: C.text }}>{r.kbana}</span>
+                  <RekBemBar breakdown={r.breakdown} actual={r.actual} max={max} />
+                  <span style={{ fontSize: 11, color: C.dim }}>{r.n} dagar</span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
 // Headline row above SnitTabell: total (all K-banor combined) daily average
 // for the selected month, same comparison chips as SnitCell.
 function TotalSnittRow({ totals, prevTotals, prevLabel, allTimeTotals }) {
@@ -598,6 +720,12 @@ export default function Historik() {
                   >
                     Trender
                   </button>
+                  <button
+                    className={"historik__snitt-btn" + (view === "bemanning" ? " is-active" : "")}
+                    onClick={() => setView("bemanning")}
+                  >
+                    Bemanning
+                  </button>
                   <ActionButton
                     style={{ marginLeft: "auto" }}
                     onClick={async () => {
@@ -655,6 +783,15 @@ export default function Historik() {
 
                 {view === "trend" && (
                   <TrendView key="trend" history={history} selMonth={selMonth} monthDays={monthDays} />
+                )}
+
+                {view === "bemanning" && (
+                  <BemanningView
+                    periodAgg={monthAgg}
+                    periodLabel={"Vald period" + (selMonth ? " (" + fmtMonth(selMonth) + ")" : "")}
+                    allAgg={totalAgg}
+                    allLabel={"All historik (" + totalDays + " dagar)"}
+                  />
                 )}
               </>
             )}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normKbana, classifyLocation, spentPersonMins, calcWork, pctDelta } from "./liveUtils.js";
+import { normKbana, classifyLocation, spentPersonMins, calcWork, pctDelta, rekommenderadBemanning, rekommenderadBemanningBreakdown } from "./liveUtils.js";
 
 // ── normKbana ─────────────────────────────────────────────────────────────────
 
@@ -144,5 +144,22 @@ describe("pctDelta", () => {
     expect(pctDelta(100, undefined)).toBeNull();
     expect(pctDelta(100, 0)).toBeNull();
     expect(pctDelta(100, -5)).toBeNull();
+  });
+});
+
+// ── rekommenderadBemanningBreakdown ─────────────────────────────────────────────
+
+describe("rekommenderadBemanningBreakdown", () => {
+  it("splits the total into kolli/kart/pall components that sum to the total", () => {
+    const b = rekommenderadBemanningBreakdown("K51", 200, 100, 5);
+    expect(b.kolliPers).toBeCloseTo((200 * 1.8) / 480);
+    expect(b.kartPers).toBeCloseTo((100 * 1.0) / 480);
+    expect(b.pallPers).toBeCloseTo((5 * 12) / 480);
+    expect(b.total).toBeCloseTo(b.kolliPers + b.kartPers + b.pallPers);
+  });
+
+  it("agrees with rekommenderadBemanning's total for the same inputs", () => {
+    const b = rekommenderadBemanningBreakdown("K63", 150, 80, 3);
+    expect(b.total).toBeCloseTo(rekommenderadBemanning("K63", 150, 80, 3));
   });
 });

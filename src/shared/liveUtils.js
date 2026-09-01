@@ -19,12 +19,21 @@ export function bastidForKbana(kbana) {
   return def ? defaultBastid(def) : 1.8;
 }
 
+// Samma formel som rekommenderadBemanning, men uppdelad per drivare (kolli/
+// kart/pall) så att man kan visa *varför* en K-bana behöver den bemanning
+// den gör, inte bara totalen. kolliPers+kartPers+pallPers === total.
+export function rekommenderadBemanningBreakdown(kbana, kolli, kart, helpall, shiftMins = 8 * 60) {
+  const bastid = bastidForKbana(kbana);
+  const kolliPers = (kolli * bastid) / shiftMins;
+  const kartPers = (kart * KARTONG_MIN) / shiftMins;
+  const pallPers = (helpall * 12) / shiftMins;
+  return { kolliPers, kartPers, pallPers, total: kolliPers + kartPers + pallPers };
+}
+
 // Rekommenderad bemanning för en hel dags volym på en K-bana, givet en
 // standard skiftlängd (8h). arbetsminuter-formeln matchar calcWork nedan.
 export function rekommenderadBemanning(kbana, kolli, kart, helpall, shiftMins = 8 * 60) {
-  const bastid = bastidForKbana(kbana);
-  const arbetsminuter = kolli * bastid + kart * KARTONG_MIN + helpall * 12;
-  return arbetsminuter / shiftMins;
+  return rekommenderadBemanningBreakdown(kbana, kolli, kart, helpall, shiftMins).total;
 }
 
 export function classifyLocation(loc) {
