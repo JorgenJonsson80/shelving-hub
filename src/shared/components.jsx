@@ -147,6 +147,26 @@ export function DeltaChip({ pct, label }) {
   );
 }
 
+// Headline "is today normal" badge — the deviation-vs-baseline story DeltaChip
+// tells quietly as a small inline number, but sized and worded to be the
+// first thing read on a K-bana card instead of one chip among several.
+// Same three-tier magnitude logic as DeltaChip (10%/25% cuts here vs 15%/30%
+// there) but graduated green→yellow→red rather than dim→yellow, since this
+// badge's whole job is to answer "normal or not" at a glance.
+export function NormalBadge({ pct }) {
+  if (pct == null || !Number.isFinite(pct)) {
+    return <span className="normal-badge normal-badge--unknown">Inget snitt än</span>;
+  }
+  const abs = Math.abs(pct);
+  const color = abs < 10 ? C.green : abs < 25 ? C.yellow : C.red;
+  const label = abs < 10 ? "Normal dag" : `${pct > 0 ? "+" : ""}${Math.round(pct)}% ${pct > 0 ? "över" : "under"} snitt`;
+  return (
+    <span className="normal-badge" style={{ color, background: color + "1c", border: `1px solid ${color}55` }}>
+      {label}
+    </span>
+  );
+}
+
 export function BedomingPill({ text }) {
   if (!text) return null;
   const color =

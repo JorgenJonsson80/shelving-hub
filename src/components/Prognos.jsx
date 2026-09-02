@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { C } from "../shared/theme";
-import { Alert, DeltaChip, Dropzone, Panel } from "../shared/components";
+import { Alert, DeltaChip, Dropzone, NormalBadge, Panel } from "../shared/components";
 import { parsePFExport } from "../shared/parsers";
 import { classifyLocation, pctDelta } from "../shared/liveUtils";
 import { fetchPfDays, upsertPfDay } from "../shared/pfDaysDb";
@@ -705,37 +705,36 @@ export default function Prognos() {
                   {VECKODAGAR[new Date().getDay()]}dagar
                 </button>
               </div>
-              {kbanaForecast.map(k => (
-                <div key={k.kb} style={{ marginBottom: 14 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{k.kb}</span>
-                    <div style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 11 }}>
-                      {k.ledtidMins > 0 && <span style={{ color: C.dim }}>+{k.ledtidMins}min</span>}
-                      {k.timme[k.topp] > 0 && <span style={{ color: C.textDim }}>topp kl {k.topp}</span>}
-                      {k.today > 0 && (
-                        <span style={{ color: C.dim, fontVariantNumeric: "tabular-nums" }}>
-                          {k.today} sett + ~{k.exp} kvar
-                        </span>
-                      )}
-                      {k.expKart != null && k.expKart > 0 && (
-                        <span style={{ color: C.dim, fontVariantNumeric: "tabular-nums" }}>
-                          · ~{k.expKart} kartonger kvar
-                        </span>
-                      )}
-                      <span style={{ fontWeight: 700, color: C.accent, fontVariantNumeric: "tabular-nums" }}>
-                        ~{k.estTotal > 0 ? k.estTotal : k.exp} tot
-                      </span>
-                      {k.monthAvg != null && (
-                        <DeltaChip pct={k.vsMonthAvg} label={`vs snitt ${Math.round(k.monthAvg)}`} />
-                      )}
+              <div className="kbana-forecast-grid">
+                {kbanaForecast.map(k => (
+                  <div key={k.kb} className="section-card">
+                    <div className="section-card__header kbana-forecast-card__head">
+                      <span>{k.kb}</span>
                       {kbanaAccuracy[k.kb] && (
                         <AccuracyChip avgOff={kbanaAccuracy[k.kb].avgOff} n={kbanaAccuracy[k.kb].n} />
                       )}
                     </div>
+                    <div className="section-card__body">
+                      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                        <span className="kbana-forecast-card__total">~{k.estTotal > 0 ? k.estTotal : k.exp}</span>
+                        <NormalBadge pct={k.vsMonthAvg} />
+                      </div>
+                      <div className="kbana-forecast-card__meta">
+                        {k.today > 0 ? `${k.today} sett + ~${k.exp} kvar` : `~${k.exp} kvar`}
+                        {k.expKart != null && k.expKart > 0 && ` · ~${k.expKart} kartonger kvar`}
+                        {k.monthAvg != null && ` · snitt ${Math.round(k.monthAvg)}`}
+                      </div>
+                      {(k.timme[k.topp] > 0 || k.ledtidMins > 0) && (
+                        <div className="kbana-forecast-card__submeta">
+                          {k.timme[k.topp] > 0 && <span>topp kl {k.topp}</span>}
+                          {k.ledtidMins > 0 && <span>+{k.ledtidMins}min ledtid</span>}
+                        </div>
+                      )}
+                      <HourBar perTimme={k.timme} highlight={k.timme[k.topp] > 0 ? [k.topp, k.topp] : null} />
+                    </div>
                   </div>
-                  <HourBar perTimme={k.timme} highlight={k.timme[k.topp] > 0 ? [k.topp, k.topp] : null} />
-                </div>
-              ))}
+                ))}
+              </div>
             </Panel>
           )}
 

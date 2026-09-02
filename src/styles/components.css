@@ -808,6 +808,42 @@
   font: 700 12px var(--font-mono);
 }
 
+/* ── Prognos per K-bana ────────────────────────────────────── */
+
+.kbana-forecast-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.kbana-forecast-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kbana-forecast-card__total {
+  font: 800 26px var(--font-mono);
+  color: var(--white);
+  font-variant-numeric: tabular-nums;
+}
+
+.kbana-forecast-card__meta {
+  margin: 6px 0 8px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.kbana-forecast-card__submeta {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: var(--dim);
+  font-size: 10.5px;
+}
+
 /* ── Topp 3 per kategori (Live) ────────────────────────────── */
 
 .topp3-grid {

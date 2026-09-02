@@ -152,6 +152,22 @@
   white-space: nowrap;
 }
 
+.normal-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font: 800 12px var(--font-mono);
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.normal-badge--unknown {
+  color: var(--dim);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+}
+
 .app-main {
   min-height: calc(100vh - 58px);
 }
