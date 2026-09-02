@@ -4,7 +4,7 @@ import { C } from "../shared/theme";
 import { Alert, Panel, ActionButton } from "../shared/components";
 import { fetchLedtidObservations, insertLedtidObservation, deleteLedtidObservation } from "../shared/ledtidDb";
 
-const KBANOR = ["K51", "K52", "K53", "K55", "K56", "K58", "K59", "K60", "K61-7", "K61-36", "K62"];
+const KBANOR = ["K51", "K52", "K53", "K55", "K56", "K58", "K59", "K60", "K61-7", "K62"];
 const ORSAKER = ["", "Ko vid mezz", "Stor korning", "Utrustning", "Fel varutyp", "Personalbrist", "Annat"];
 // Old localStorage key — no longer written to, only read once for the
 // one-time "import my local observations into Supabase" migration button.

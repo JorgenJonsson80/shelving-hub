@@ -22,17 +22,18 @@ const LABEL_RE = /^K-?(\d{2})(-\d+)?$/i;
 const KBANA_LINE = {
   K51: "Line 1", K52: "Line 1/2", K53: "Line 1/2", K56: "Line 2/4",
   K58: "Line 4/6", K59: "Line 6/7", K60: "Line 6/7", "K61-7": "Line 7",
-  K55: "Stn 36", "K61-36": "Stn 36", K62: "Stn 50",
+  K55: "Stn 36", K62: "Stn 50",
 };
 
 function cellStr(R, r, c) {
   return String(R[r]?.[c] ?? "").trim();
 }
 
-// "K-56" → "K56"; "K-61" → K61-7 (övre block) eller K61-36 (Stn-block, rad ≥ 45)
+// "K-56" → "K56"; "K-61" → K61-7 (övre block) eller K55 (Stn-block, rad ≥ 45 —
+// den delen hette K61-36 innan den lades ned permanent 2026-09)
 function normLabel(raw, row) {
   const s = raw.replace(/-/g, "").toUpperCase();
-  if (s === "K61") return row < 45 ? "K61-7" : "K61-36";
+  if (s === "K61") return row < 45 ? "K61-7" : "K55";
   return s;
 }
 

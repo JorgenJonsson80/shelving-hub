@@ -22,7 +22,7 @@ import { pctDelta, rekommenderadBemanning, rekommenderadBemanningBreakdown } fro
 // in this same tab (SnitTabell/DagTabell's REK. BEM. column).
 const BEMANNING_COLOR = { kolli: C.blue, kart: C.yellow, pall: C.accent };
 
-const KBANA_ORDER = ["K51","K52","K53","K55","K56","K58","K59","K60","K61-7","K61-36","K62","K63"];
+const KBANA_ORDER = ["K51","K52","K53","K55","K56","K58","K59","K60","K61-7","K62","K63"];
 // Old localStorage key — no longer written to, only read once for the
 // one-time "import my local history into Supabase" migration button.
 const LEGACY_STORAGE_KEY = "shelving_history_v2";

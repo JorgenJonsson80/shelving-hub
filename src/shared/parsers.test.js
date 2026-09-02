@@ -70,7 +70,7 @@ describe("parseLiveByLabel", () => {
     expect(kbanor[0].line).toBe("Line 7");
   });
 
-  it("disambiguates K61 → K61-36 when label row ≥ 45", () => {
+  it("disambiguates K61 → K55 when label row ≥ 45 (was K61-36, retired 2026-09)", () => {
     const sheet = makeSheet([
       [50, 5, "K-61"],
       [51, 7, "Påfyllningar"],
@@ -80,7 +80,7 @@ describe("parseLiveByLabel", () => {
       [55, 0, "Total"],     [55, 7, 7],
     ]);
     const { kbanor } = parseLiveByLabel(sheet);
-    expect(kbanor[0].kbana).toBe("K61-36");
+    expect(kbanor[0].kbana).toBe("K55");
     expect(kbanor[0].line).toBe("Stn 36");
   });
 

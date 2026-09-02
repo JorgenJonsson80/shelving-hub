@@ -5,16 +5,17 @@ import { ActionButton, Alert, DataTable, Dropzone, PageHeader, Panel } from "../
 import { classifyLocation } from "../shared/liveUtils";
 import { useSetting } from "../shared/useSetting";
 
-const KBANA_LIST = ["K51","K52","K53","K55","K56","K58","K59","K60","K61-7","K61-36","K62","K63"];
+const KBANA_LIST = ["K51","K52","K53","K55","K56","K58","K59","K60","K61-7","K62","K63"];
 
+// K61-36 (Stn 36) permanently retired 2026-09 — folded into K55.
 function mapInfattningKbana(rawK, line) {
   const k = String(rawK).trim().toUpperCase();
   const l = String(line).trim();
   if (l === "KG" || l === "KYL") return null;
   if (k === "VA") return "K58";
   if (k === "61 7" || k === "617") return "K61-7";
-  if (k === "61 36" || k === "6136") return "K61-36";
-  if (k === "61" && l === "Stn 36") return "K61-36";
+  if (k === "61 36" || k === "6136") return "K55";
+  if (k === "61" && l === "Stn 36") return "K55";
   if (k === "61" && l === "Line 7") return "K61-7";
   return "K" + k.replace(/\s/g, "");
 }

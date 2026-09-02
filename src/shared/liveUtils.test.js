@@ -34,7 +34,7 @@ describe("classifyLocation", () => {
     expect(classifyLocation("K51-A-01")).toBe("K51");
     expect(classifyLocation("K52-X")).toBe("K52");
     expect(classifyLocation("K62-ZZZ")).toBe("K62");
-    expect(classifyLocation("K61-36-B")).toBe("K61-36");
+    expect(classifyLocation("K61-36-B")).toBe("K55"); // K61-36 retired 2026-09, folded into K55
     expect(classifyLocation("K61-7-B")).toBe("K61-7");
   });
 

@@ -15,7 +15,6 @@ export const CELL_MAP = {
     { kbana: "K60",    line: "Line 6/7" },
     { kbana: "K61-7",  line: "Line 7"   },
     { kbana: "K55",    line: "Stn 36"   },
-    { kbana: "K61-36", line: "Stn 36"   },
     { kbana: "K62",    line: "Stn 50"   },
   ],
 };

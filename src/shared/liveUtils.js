@@ -40,9 +40,11 @@ export function classifyLocation(loc) {
   if (!loc) return null;
   const s = String(loc).trim().toUpperCase();
 
-  // K-prefix format (legacy)
+  // K-prefix format (legacy). K61-36 (Stn 36) was permanently retired
+  // 2026-09 — that line's volume now belongs to K55, so any leftover
+  // legacy-format code still tagged K61-36 is remapped here too.
   for (const kb of ["K61-36", "K61-7", "K51", "K52", "K53", "K55", "K56", "K58", "K59", "K60", "K62"]) {
-    if (s.startsWith(kb)) return kb;
+    if (s.startsWith(kb)) return kb === "K61-36" ? "K55" : kb;
   }
 
   // P-prefix format
@@ -57,18 +59,11 @@ export function classifyLocation(loc) {
   const lastDigit = lpl !== null ? lpl % 10 : null;
   const isEven = lastDigit !== null && lastDigit % 2 === 0;
   const isOdd  = lastDigit !== null && lastDigit % 2 === 1;
-  // P3 → allt till K55 tills vidare. Tidigare gav vissa P3-koder K61-36 istället
-  // (se bevarad logik nedan) — oklart om det behövs igen i framtiden, så den
-  // tas inte bort, bara ur bruk.
+  // P3 → allt till K55. Det fanns tidigare en uppdelningslogik som gav vissa
+  // P3-koder K61-36 istället (bevarad i git-historiken, commit a6b655e och
+  // tidigare) — borttagen helt (inte bara avstängd) sen K61-36 permanent
+  // lades ned 2026-09, det finns inget kvar att dela upp mot.
   if (s.startsWith("P3")) return "K55";
-  // const t7 = s[6], t8 = s[7], t10 = s[9], t11 = s[10];
-  // const t1011 = (t10 || "") + (t11 || "");
-  // if (s.startsWith("P3")) {
-  //   const t7d = /[0-9]/.test(t7 || "");
-  //   const n = parseInt(t1011, 10);
-  //   if (t7d || t8 === "A" || (t8 === "B" && !isNaN(n) && n >= 1 && n <= 13)) return "K55";
-  // }
-  // if (stn === 36) return "K61-36";
   if (s.startsWith("P101")) {
     if (isEven) return "K51";
     if (isOdd && stn >= 10 && stn <= 14) return "K52";
