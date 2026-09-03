@@ -5,6 +5,7 @@ import { parsePFExport } from "../shared/parsers";
 import { classifyLocation, pctDelta } from "../shared/liveUtils";
 import { fetchPfDays, upsertPfDay } from "../shared/pfDaysDb";
 import { fetchLedtidObservations } from "../shared/ledtidDb";
+import { fetchHistorikDays, buildKbanaNormals } from "../shared/kbanaNormals";
 import { useSetting } from "../shared/useSetting";
 import {
   KURVA, MIN_SAMPLES_VECKODAG, MIN_SAMPLES_POOLAD, MIN_SAMPLES_MANAD, KALLA_MIN_ANDEL,
@@ -125,6 +126,7 @@ export default function Prognos() {
   const [storedDays, setStoredDays] = useState([]);
   const [filterVeckodag, setFilterVeckodag] = useState(false);
   const [ledtidObs, setLedtidObs]   = useState([]);
+  const [historikDays, setHistorikDays] = useState([]);
   const [checkpoints, setCheckpoints] = useSetting("prognos_checkpoints", {});
   const [, setSharedKbanaForecast]    = useSetting("prognos_kbana_forecast", null);
 
@@ -139,6 +141,10 @@ export default function Prognos() {
 
   useEffect(() => {
     fetchLedtidObservations().then(setLedtidObs).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchHistorikDays().then(setHistorikDays).catch(() => {});
   }, []);
 
   const nowHour = now.getHours();
@@ -157,6 +163,25 @@ export default function Prognos() {
     }
     return { kurva: KURVA, tier: "fast", n: 0, days: [] };
   }, [storedDays, todayData, now]);
+
+  // Pallar (helpall) har ingen tidsstämplad rad-för-rad-data som PF/kartonger
+  // — Historik-exporten är en dagstotal, inte en logg. Går alltså inte att
+  // bygga en "sett hittills"-kurva av samma slag; det här är ett rent
+  // historiskt snitt per K-bana (samma veckodag/pool-tiering som Live och
+  // Brief redan använder via kbanaNormals.js), och uppdateras INTE av
+  // dagens PF-fil eller av tiden på dygnet.
+  const kbanaNormals = useMemo(
+    () => buildKbanaNormals(historikDays, now.getDay()),
+    [historikDays, now]
+  );
+
+  const pallForecast = useMemo(() => {
+    const entries = Object.values(kbanaNormals);
+    if (!entries.length) return null;
+    const total = entries.reduce((s, v) => s + v.helpall, 0);
+    const n = Math.max(...entries.map(v => v.n));
+    return { total: Math.round(total), n, tier: entries[0].tier };
+  }, [kbanaNormals]);
 
   const handleFile = (f) => {
     setErr(null);
@@ -380,11 +405,17 @@ export default function Prognos() {
       const kartPerPf = h.pf > 0 ? h.labels / h.pf : 0;
       const expKart = forecast.kartonger.kvar != null ? Math.round(exp * kartPerPf) : null;
 
-      result.push({ kb, exp: Math.round(exp), timme, topp, ledtidMins: ledtidKb[kb] || 0, today, estTotal, monthAvg, vsMonthAvg, todayKart, expKart });
+      // Rent historiskt dagssnitt, inte kopplat till exp/kartPerPf ovan —
+      // se kommentaren vid kbanaNormals. Null om K-banan saknar tillräckligt
+      // med Historik-dagar för den här veckodagen/poolen.
+      const pallAvg = kbanaNormals[kb]?.helpall;
+      const pallAvgRounded = pallAvg != null ? Math.round(pallAvg) : null;
+
+      result.push({ kb, exp: Math.round(exp), timme, topp, ledtidMins: ledtidKb[kb] || 0, today, estTotal, monthAvg, vsMonthAvg, todayKart, expKart, pallAvg: pallAvgRounded });
     }
 
     return result.sort((a, b) => b.estTotal - a.estTotal);
-  }, [forecast, nowHour, filterVeckodag, todayData, storedDays, ledtidObs, effectiveKurva]);
+  }, [forecast, nowHour, filterVeckodag, todayData, storedDays, ledtidObs, effectiveKurva, kbanaNormals]);
 
   const saveCheckpoint = () => {
     if (!todayData || !forecast) return;
@@ -572,6 +603,14 @@ export default function Prognos() {
                 <div style={{ fontSize: 12, color: C.dim, marginTop: 8 }}>
                   ≈ <strong style={{ color: C.text }}>{forecast.totalEst}</strong> PF totalt idag
                   {forecast.kartonger.estTotal != null && <> · ≈ <strong style={{ color: C.text }}>{forecast.kartonger.estTotal}</strong> kartonger</>}
+                  {pallForecast && <> · ≈ <strong style={{ color: C.text }}>{pallForecast.total}</strong> pallar (snitt)</>}
+                </div>
+                <div style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>
+                  PF och kartonger: {forecast.sett} sett hittills kl {tidStr}, projicerat mot{" "}
+                  {forecast.kurvaTier === "veckodag" && `${forecast.kurvaN} tidigare ${VECKODAGAR[now.getDay()].toLowerCase()}dagars kurva`}
+                  {forecast.kurvaTier === "poolad" && `${forecast.kurvaN} dagars poolad kurva`}
+                  {forecast.kurvaTier === "fast" && "en standardkurva"}.
+                  {pallForecast && <> Pallar: rent historiskt snitt ({pallForecast.n} {pallForecast.tier === "veckodag" ? `${VECKODAGAR[now.getDay()].toLowerCase()}dagar` : "dagar totalt"}) — påverkas inte av dagens siffror eller klockan.</>}
                 </div>
               </div>
               {/* Progress bar */}
@@ -679,6 +718,20 @@ export default function Prognos() {
             </Panel>
           )}
 
+          {/* Pallar (helpall) — rent historiskt snitt, se kbanaNormals-kommentaren ovan */}
+          {pallForecast && (
+            <Panel title="PALLAR (HELPALL) — HISTORISKT SNITT">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", flexWrap: "wrap", gap: 6 }}>
+                <span style={{ fontSize: 11, color: C.dim }}>
+                  Snitt {pallForecast.n} {pallForecast.tier === "veckodag" ? `${VECKODAGAR[now.getDay()].toLowerCase()}dagar` : "dagar totalt"} — ingen data om dagens inflöde ännu
+                </span>
+                <span style={{ fontWeight: 700, color: C.textDim, fontVariantNumeric: "tabular-nums" }}>
+                  ≈{pallForecast.total} pallar väntas idag
+                </span>
+              </div>
+            </Panel>
+          )}
+
           {/* Hourly distribution chart */}
           <Panel title="INFLÖDE PER TIMME (IDAG)">
             <div style={{ padding: "8px 0" }}>
@@ -724,10 +777,11 @@ export default function Prognos() {
                         {k.expKart != null && k.expKart > 0 && ` · ~${k.expKart} kartonger kvar`}
                         {k.monthAvg != null && ` · snitt ${Math.round(k.monthAvg)}`}
                       </div>
-                      {(k.timme[k.topp] > 0 || k.ledtidMins > 0) && (
+                      {(k.timme[k.topp] > 0 || k.ledtidMins > 0 || k.pallAvg != null) && (
                         <div className="kbana-forecast-card__submeta">
                           {k.timme[k.topp] > 0 && <span>topp kl {k.topp}</span>}
                           {k.ledtidMins > 0 && <span>+{k.ledtidMins}min ledtid</span>}
+                          {k.pallAvg != null && <span>~{k.pallAvg} pallar (snitt, ej live)</span>}
                         </div>
                       )}
                       <HourBar perTimme={k.timme} highlight={k.timme[k.topp] > 0 ? [k.topp, k.topp] : null} />
