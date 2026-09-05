@@ -7,6 +7,7 @@ import { useSetting } from "../shared/useSetting";
 import { fetchHistorikDays, buildKbanaNormals } from "../shared/kbanaNormals";
 import {
   FlowBar, StatusPill, AheadBehindPill, WorkCalc, ScheduleOverview, PassSettings, Topp3Panel,
+  KringuppgifterSettings,
 } from "./live/LiveSubComponents";
 
 const TROSKEL_TRIVIAL = 0.3;
@@ -152,6 +153,7 @@ export default function Live() {
   const [schedule,        setSchedule]        = useSetting("live_schedule", {});
   const [bastidPerK,      setBastidPerK]      = useSetting("live_bastid", {});
   const [passes,          setPasses]          = useSetting("live_passes", DEFAULT_PASSES);
+  const [kringuppgifterPct, setKringuppgifterPct] = useSetting("kringuppgifter_pct", 0, { debounceMs: 500 });
   const [now,             setNow]             = useState(() => new Date());
   const [historikDays,    setHistorikDays]    = useState([]);
 
@@ -219,7 +221,7 @@ export default function Live() {
 
       const { sen, pr, tk, jobbKvar, bem } = calcLaneMetrics(
         kb.pafyll, kb.kart, pallKvar, pallKlart, pers, sched, nowMins, bastid,
-        persHistToday(kb.kbana), forecastByKb?.[kb.kbana], forecastKartByKb?.[kb.kbana]
+        persHistToday(kb.kbana), forecastByKb?.[kb.kbana], forecastKartByKb?.[kb.kbana], kringuppgifterPct
       );
       if (sen === null) return { id: kb.kbana, sen: 0, pr, tk: 0, jobbKvar: 0, bem, kategori: "saknas", kartKvar, pallKvar, kolliKvar };
 
@@ -246,7 +248,7 @@ export default function Live() {
       .sort((a, b) => a.sen - b.sen);
 
     return { banor, lediga, kriser };
-  }, [data, manualBemanning, persHistToday, forecastByKb, forecastKartByKb, manualPall, schedule, nowMins, bastidPerK]);
+  }, [data, manualBemanning, persHistToday, forecastByKb, forecastKartByKb, manualPall, schedule, nowMins, bastidPerK, kringuppgifterPct]);
 
   // ── Åtgärdsplan från EN matchningsloop ───────────────────────────────────
   const atgarder = useMemo(() => {
@@ -416,6 +418,7 @@ export default function Live() {
       {data && (
         <div className="anim-fade-up">
           <PassSettings passes={passes} onChange={updatePass} />
+          <KringuppgifterSettings pct={kringuppgifterPct} onChange={setKringuppgifterPct} />
           <ScheduleOverview kbanor={data.kbanor} schedule={schedule} nowMins={nowMins} />
 
           {/* ── Saldo-block: Klarar vi passet? ── */}

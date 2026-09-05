@@ -163,3 +163,55 @@ describe("rekommenderadBemanningBreakdown", () => {
     expect(b.total).toBeCloseTo(rekommenderadBemanning("K63", 150, 80, 3));
   });
 });
+
+// ── kringuppgifterPct ─────────────────────────────────────────────────────────
+
+describe("rekommenderadBemanning kringuppgifterPct", () => {
+  it("defaults to 0 (no behavior change) when omitted", () => {
+    const withPct = rekommenderadBemanning("K51", 200, 100, 5, 480, 0);
+    const omitted = rekommenderadBemanning("K51", 200, 100, 5);
+    expect(omitted).toBeCloseTo(withPct);
+  });
+
+  it("scales the recommended total up by 1/(1-pct/100)", () => {
+    const base = rekommenderadBemanning("K51", 200, 100, 5);
+    const with10pct = rekommenderadBemanning("K51", 200, 100, 5, 480, 10);
+    expect(with10pct).toBeCloseTo(base / 0.9);
+  });
+
+  it("keeps kolliPers+kartPers+pallPers === total after scaling", () => {
+    const b = rekommenderadBemanningBreakdown("K51", 200, 100, 5, 480, 15);
+    expect(b.total).toBeCloseTo(b.kolliPers + b.kartPers + b.pallPers);
+  });
+
+  it("never divides by zero/negative for pct >= 100", () => {
+    const b = rekommenderadBemanningBreakdown("K51", 200, 100, 5, 480, 150);
+    expect(Number.isFinite(b.total)).toBe(true);
+    expect(b.total).toBeGreaterThan(0);
+  });
+});
+
+describe("calcWork kringuppgifterPct", () => {
+  const H = (h, m = 0) => h * 60 + m;
+  const pafyll = { iko: 10, pavag: 0, klart: 0 };
+  const sched = [{ start: "06:00", end: "14:00" }];
+
+  it("defaults to 0 (no behavior change) when omitted", () => {
+    const withPct = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8, [], 0, 0, 0);
+    const omitted = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8);
+    expect(omitted.buffer).toBeCloseTo(withPct.buffer);
+  });
+
+  it("reduces availMins/buffer by the given percentage, leaving remainWork untouched", () => {
+    const plain  = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8);
+    const withPct = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8, [], 0, 0, 20);
+    expect(withPct.availMins).toBeCloseTo(plain.availMins * 0.8);
+    expect(withPct.remainWork).toBeCloseTo(plain.remainWork);
+    expect(withPct.buffer).toBeCloseTo(withPct.availMins - withPct.remainWork);
+  });
+
+  it("never lets pct >= 100 produce negative availMins", () => {
+    const w = calcWork(pafyll, null, 0, 0, 2, sched, H(10), 1.8, [], 0, 0, 150);
+    expect(w.availMins).toBe(0);
+  });
+});

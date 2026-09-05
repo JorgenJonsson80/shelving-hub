@@ -19,21 +19,36 @@ export function bastidForKbana(kbana) {
   return def ? defaultBastid(def) : 1.8;
 }
 
+// "Kringuppgifter" — andel av arbetstiden som går åt till saker som inte
+// syns i volymen (påfyllning, leta försvunna varor, städ etc). En person som
+// lägger `pct`% av tiden på det har bara (1-pct/100) kvar för det som driver
+// kolli/kart/pall-formlerna nedan, så den faktiska rekommenderade bemanningen
+// (och, i calcWork, den faktiskt tillgängliga tiden) behöver skalas upp med
+// 1/(1-pct/100) för att fortfarande täcka volymen. Delat globalt reglage
+// (app_settings-nyckel "kringuppgifter_pct", satt i Live.jsx) — samma
+// resonemang gäller oavsett om man tittar framåt (calcWork) eller på en hel
+// dags facit (rekommenderadBemanning). Clampat så 100%+ aldrig ger
+// division med ~0/negativt.
+function kringuppgifterFactor(pct) {
+  return 1 / Math.max(0.05, 1 - (pct || 0) / 100);
+}
+
 // Samma formel som rekommenderadBemanning, men uppdelad per drivare (kolli/
 // kart/pall) så att man kan visa *varför* en K-bana behöver den bemanning
 // den gör, inte bara totalen. kolliPers+kartPers+pallPers === total.
-export function rekommenderadBemanningBreakdown(kbana, kolli, kart, helpall, shiftMins = 8 * 60) {
+export function rekommenderadBemanningBreakdown(kbana, kolli, kart, helpall, shiftMins = 8 * 60, kringuppgifterPct = 0) {
   const bastid = bastidForKbana(kbana);
-  const kolliPers = (kolli * bastid) / shiftMins;
-  const kartPers = (kart * KARTONG_MIN) / shiftMins;
-  const pallPers = (helpall * 12) / shiftMins;
+  const factor = kringuppgifterFactor(kringuppgifterPct);
+  const kolliPers = (kolli * bastid) / shiftMins * factor;
+  const kartPers = (kart * KARTONG_MIN) / shiftMins * factor;
+  const pallPers = (helpall * 12) / shiftMins * factor;
   return { kolliPers, kartPers, pallPers, total: kolliPers + kartPers + pallPers };
 }
 
 // Rekommenderad bemanning för en hel dags volym på en K-bana, givet en
 // standard skiftlängd (8h). arbetsminuter-formeln matchar calcWork nedan.
-export function rekommenderadBemanning(kbana, kolli, kart, helpall, shiftMins = 8 * 60) {
-  return rekommenderadBemanningBreakdown(kbana, kolli, kart, helpall, shiftMins).total;
+export function rekommenderadBemanning(kbana, kolli, kart, helpall, shiftMins = 8 * 60, kringuppgifterPct = 0) {
+  return rekommenderadBemanningBreakdown(kbana, kolli, kart, helpall, shiftMins, kringuppgifterPct).total;
 }
 
 export function classifyLocation(loc) {
@@ -161,7 +176,7 @@ export function spentPersonMins(persHistory, startMins, nowMins, currentPers) {
 // already sitting in queue right now, so a lane looks comfortably ahead all
 // morning and then falls off a cliff the moment a forecasted wave (e.g. a
 // midday release) actually lands.
-export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli = 0, forecastKart = 0) {
+export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli = 0, forecastKart = 0, kringuppgifterPct = 0) {
   if (!pafyll || !sched || !sched.length || !pers || pers <= 0) return null;
   const bounds = getShiftBounds(sched);
   if (!bounds) return null;
@@ -189,7 +204,11 @@ export function calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins
   const queueWork  = pafyllKvar * bastidMins + kartKvar * KARTONG_MIN + pallKvar * 12;
   const doneWork   = pafyllKlart * bastidMins + kartKlart * KARTONG_MIN + pallKlart * 12;
 
-  const availMins = pers * remainH * 60;
+  // En del av tiden går åt till kringuppgifter (påfyllning, leta försvunna
+  // varor etc) som inte syns i pafyll/kart/pall-köerna — se
+  // kringuppgifterFactor ovan för samma resonemang applicerat på
+  // rekommenderadBemanning. Clampat så 100%+ aldrig ger negativ tid.
+  const availMins = pers * remainH * 60 * Math.max(0, 1 - (kringuppgifterPct || 0) / 100);
   const buffer    = availMins - remainWork;
 
   const spentMins = spentPersonMins(persHistory, bounds.startMins, nowMins, pers);
@@ -214,8 +233,8 @@ export function fmtClock(mins) {
   return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}${rolled ? " (+1d)" : ""}`;
 }
 
-export function calcLaneMetrics(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli, forecastKart) {
-  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli, forecastKart);
+export function calcLaneMetrics(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli, forecastKart, kringuppgifterPct) {
+  const w = calcWork(pafyll, kart, pallKvar, pallKlart, pers, sched, nowMins, bastidMins, persHistory, forecastKolli, forecastKart, kringuppgifterPct);
   const { active } = getWorkerStatus(sched, nowMins);
   return {
     sen:      w ? w.buffer / 60 : null,

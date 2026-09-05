@@ -234,6 +234,29 @@ export function Topp3Panel({ banor }) {
   );
 }
 
+// Globalt reglage: andel av arbetstiden som går åt till kringuppgifter
+// (påfyllning, leta försvunna varor, städ etc) istället för det som syns i
+// volymen. Dras av från tillgänglig tid i calcWork (Live-buffert) OCH skalar
+// upp rekommenderadBemanning i Bemanning/Historik/Brief — samma reglage,
+// samma app_settings-nyckel ("kringuppgifter_pct"), så de läser konsekvent.
+export function KringuppgifterSettings({ pct, onChange }) {
+  return (
+    <Panel title="KRINGUPPGIFTER">
+      <div className="range-row">
+        <span>Andel av tiden:</span>
+        <input type="range" min="0" max="40" value={pct} onChange={e => onChange(+e.target.value)}
+          style={{ accentColor: C.accent }} />
+        <strong>{pct}%</strong>
+      </div>
+      <div style={{ fontSize: 11, color: C.dim, marginTop: -6 }}>
+        Tid som går åt till påfyllning, leta försvunna varor m.m. — dras av från tillgänglig
+        tid i buffert/saldo här i Live, och räknas in i rekommenderad bemanning på
+        Bemanning/Historik/Brief.
+      </div>
+    </Panel>
+  );
+}
+
 export function PassSettings({ passes, onChange }) {
   return (
     <Panel title="PASS-TIDER" className="pass-settings">

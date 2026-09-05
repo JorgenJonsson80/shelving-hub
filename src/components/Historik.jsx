@@ -16,6 +16,7 @@ import {
 } from "../shared/components";
 import { parseDailyRows } from "../shared/parseDailyRows";
 import { pctDelta, rekommenderadBemanning, rekommenderadBemanningBreakdown } from "../shared/liveUtils";
+import { useSetting } from "../shared/useSetting";
 
 // Fixed categorical colors for the bemanning-breakdown bars — kept separate
 // from green/red since those already mean "över/under bemannat" elsewhere
@@ -96,7 +97,7 @@ function shiftMonthKey(monthKey, delta) {
 // Per-K-bana averages (kolli/kart/pall/pers/prest/gap) across a list of day
 // objects ({ rows: [...] }). Shared by the current-month, previous-month and
 // all-time aggregations in Historik so the three stay in sync.
-function aggregateKbanaRows(days) {
+function aggregateKbanaRows(days, kringuppgifterPct = 0) {
   const byK = {};
   for (const d of days) {
     for (const r of d.rows) {
@@ -122,7 +123,7 @@ function aggregateKbanaRows(days) {
       prest: v.pa.length ? v.pa.reduce((a, b) => a + b) / v.pa.length : 0,
       gap: v.ga.reduce((a, b) => a + b) / v.ga.length,
       ko, ka, pall, pers,
-      rekBem: rekommenderadBemanning(k, ko, ka, pall),
+      rekBem: rekommenderadBemanning(k, ko, ka, pall, undefined, kringuppgifterPct),
       n: v.n,
     };
   }
@@ -259,7 +260,7 @@ function TrendView({ history, selMonth, monthDays }) {
   );
 }
 
-function DagTabell({ rows }) {
+function DagTabell({ rows, kringuppgifterPct }) {
   return (
     <DataTable headers={[
       "BANA",
@@ -278,7 +279,7 @@ function DagTabell({ rows }) {
             if (!r) return null;
             const scanPct = r.scannat != null ? Math.round(r.scannat * 100) : null;
             const scanColor = scanPct == null ? C.dim : scanPct < 20 ? C.dim : scanPct < 60 ? C.red : scanPct < 75 ? C.yellow : C.green;
-            const rekBem = rekommenderadBemanning(r.kbana, r.kolli, r.kart, r.helpall);
+            const rekBem = rekommenderadBemanning(r.kbana, r.kolli, r.kart, r.helpall, undefined, kringuppgifterPct);
             const rekColor = r.pers >= rekBem ? C.green : r.pers >= rekBem * 0.9 ? C.yellow : C.red;
             return (
               <tr key={k}>
@@ -420,7 +421,7 @@ function RekBemBar({ breakdown, actual, max, width = 200 }) {
 // between the two, per Jörgens ask ("antingen all historik eller vald
 // historik"). Unrounded (toFixed(1), not Math.round) since a "1.4" vs "1.0"
 // distinction is exactly the point.
-function BemanningView({ periodAgg, periodLabel, allAgg, allLabel }) {
+function BemanningView({ periodAgg, periodLabel, allAgg, allLabel, kringuppgifterPct }) {
   const [scope, setScope] = useState("period");
   const active = scope === "period" ? periodAgg : allAgg;
 
@@ -428,9 +429,9 @@ function BemanningView({ periodAgg, periodLabel, allAgg, allLabel }) {
     if (!active) return [];
     return KBANA_ORDER.filter(k => active[k]).map(k => {
       const r = active[k];
-      return { kbana: k, breakdown: rekommenderadBemanningBreakdown(k, r.ko, r.ka, r.pall), actual: r.pers, n: r.n };
+      return { kbana: k, breakdown: rekommenderadBemanningBreakdown(k, r.ko, r.ka, r.pall, undefined, kringuppgifterPct), actual: r.pers, n: r.n };
     });
-  }, [active]);
+  }, [active, kringuppgifterPct]);
 
   const max = Math.max(...rows.map(r => r.breakdown.total), ...rows.map(r => r.actual), 0.1);
 
@@ -510,6 +511,8 @@ export default function Historik() {
   const [selDay, setSelDay] = useState(null);
   const [view, setView] = useState("dag");
   const [legacyLocal] = useState(() => loadLegacyLocalHistory());
+  // Delat globalt reglage från Live.jsx — se KringuppgifterSettings där.
+  const [kringuppgifterPct] = useSetting("kringuppgifter_pct", 0, { pollMs: 60_000 });
 
   useEffect(() => {
     fetchHistory().then(h => {
@@ -581,8 +584,8 @@ export default function Historik() {
 
   const monthAgg = useMemo(() => {
     if (!selMonth || !history[selMonth]) return null;
-    return aggregateKbanaRows(Object.values(history[selMonth]));
-  }, [history, selMonth]);
+    return aggregateKbanaRows(Object.values(history[selMonth]), kringuppgifterPct);
+  }, [history, selMonth, kringuppgifterPct]);
 
   // Calendar month immediately before selMonth — used for the "vs föregående
   // månad" comparison. Always relative to whichever month is selected (not
@@ -592,8 +595,8 @@ export default function Historik() {
 
   const prevMonthAgg = useMemo(() => {
     if (!prevMonthKey || !history[prevMonthKey]) return null;
-    return aggregateKbanaRows(Object.values(history[prevMonthKey]));
-  }, [history, prevMonthKey]);
+    return aggregateKbanaRows(Object.values(history[prevMonthKey]), kringuppgifterPct);
+  }, [history, prevMonthKey, kringuppgifterPct]);
 
   const prevMonthLabel = prevMonthKey ? MONTHS_SHORT[parseInt(prevMonthKey.split("-")[1], 10) - 1] : "";
 
@@ -611,8 +614,8 @@ export default function Historik() {
   // "totalsnitt" baseline.
   const totalAgg = useMemo(() => {
     const allDays = Object.values(history).flatMap(m => Object.values(m));
-    return allDays.length ? aggregateKbanaRows(allDays) : null;
-  }, [history]);
+    return allDays.length ? aggregateKbanaRows(allDays, kringuppgifterPct) : null;
+  }, [history, kringuppgifterPct]);
 
   const allTimeTotals = useMemo(() => {
     const allDays = Object.values(history).flatMap(m => Object.values(m));
@@ -638,6 +641,11 @@ export default function Historik() {
           <div className="historik__title">
             {allMonths.length} månad{allMonths.length !== 1 ? "er" : ""} — {totalDays} dagar
           </div>
+          {kringuppgifterPct > 0 && (
+            <div style={{ fontSize: 11, color: C.dim, marginTop: 2 }}>
+              REK. BEM. inkl. {kringuppgifterPct}% kringuppgifter (ställs in i Live)
+            </div>
+          )}
         </div>
         <div className="historik__topbar-actions">
           {msg && <span className="historik__msg">{msg}</span>}
@@ -765,7 +773,7 @@ export default function Historik() {
                       ))}
                     </MetricGrid>
                     <Panel title={dayData.fileName} flush>
-                      <DagTabell rows={dayData.rows} />
+                      <DagTabell rows={dayData.rows} kringuppgifterPct={kringuppgifterPct} />
                     </Panel>
                   </div>
                 )}
@@ -791,6 +799,7 @@ export default function Historik() {
                     periodLabel={"Vald period" + (selMonth ? " (" + fmtMonth(selMonth) + ")" : "")}
                     allAgg={totalAgg}
                     allLabel={"All historik (" + totalDays + " dagar)"}
+                    kringuppgifterPct={kringuppgifterPct}
                   />
                 )}
               </>

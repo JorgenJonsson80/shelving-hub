@@ -19,6 +19,7 @@ import { parseDailyRows } from "../shared/parseDailyRows";
 import { callAI } from "../shared/api";
 import { pctDelta, rekommenderadBemanning } from "../shared/liveUtils";
 import { fetchHistorikDays, buildKbanaNormals } from "../shared/kbanaNormals";
+import { useSetting } from "../shared/useSetting";
 
 const MONTH_MAP = { jan:1,feb:2,mar:3,apr:4,maj:5,jun:6,jul:7,aug:8,sep:9,okt:10,nov:11,dec:12 };
 
@@ -87,6 +88,8 @@ export default function Brief() {
   const [err, setErr] = useState(null);
   const [drag, setDrag] = useState(false);
   const [historikDays, setHistorikDays] = useState([]);
+  // Delat globalt reglage från Live.jsx — se KringuppgifterSettings där.
+  const [kringuppgifterPct] = useSetting("kringuppgifter_pct", 0, { pollMs: 60_000 });
 
   // Bonus context for the comparison chips + AI prompt below — not on the
   // critical path, so a failed fetch (e.g. offline) just means no "vs
@@ -157,7 +160,8 @@ export default function Brief() {
       <PageHeader
         eyebrow="Daily Brief"
         title="Morgonanalys"
-        subtitle="Summera gårdagens volym, prestation, gap och scan-avvikelser per bana."
+        subtitle={"Summera gårdagens volym, prestation, gap och scan-avvikelser per bana."
+          + (kringuppgifterPct > 0 ? ` REK. BEM. inkl. ${kringuppgifterPct}% kringuppgifter (ställs in i Live).` : "")}
       />
 
       {err && <Alert>{err}</Alert>}
@@ -222,7 +226,7 @@ export default function Brief() {
                   const scanRate = r.scannat != null ? r.scannat : getScanRate(r.kbana, parsed.scanRates);
                   const scanPct = scanRate != null ? Math.round(scanRate * 100) : null;
                   const scanColor = scanPct == null ? C.dim : scanPct < 20 ? C.dim : scanPct < 60 ? C.red : scanPct < 75 ? C.yellow : C.green;
-                  const rekBem = rekommenderadBemanning(r.kbana, r.kolli, r.kart, r.helpall);
+                  const rekBem = rekommenderadBemanning(r.kbana, r.kolli, r.kart, r.helpall, undefined, kringuppgifterPct);
                   const rekColor = r.pers >= rekBem ? C.green : r.pers >= rekBem * 0.9 ? C.yellow : C.red;
                   const normal = kbanaNormals[r.kbana];
                   const kolliPct = normal?.n >= 3 ? pctDelta(r.kolli, normal.kolli) : null;

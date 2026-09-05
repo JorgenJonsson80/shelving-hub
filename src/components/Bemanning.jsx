@@ -7,6 +7,7 @@ import {
 import { callAI } from "../shared/api";
 import { rekommenderadBemanning } from "../shared/liveUtils";
 import { fetchHistorikDays, buildKbanaNormals } from "../shared/kbanaNormals";
+import { useSetting } from "../shared/useSetting";
 
 const WEEKDAYS_SV = ["Söndag", "Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag"];
 
@@ -67,6 +68,10 @@ export default function Bemanning() {
   const [report, setReport] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportErr, setReportErr] = useState(null);
+  // Delat globalt reglage från Live.jsx — se KringuppgifterSettings där.
+  // Polled: kan ändras i Live medan den här fliken redan är monterad (alla
+  // flikar mountar samtidigt, se arkitektur-anteckning).
+  const [kringuppgifterPct] = useSetting("kringuppgifter_pct", 0, { pollMs: 60_000 });
 
   // Bonus context for the staffing report below — not on the critical path,
   // so a failed fetch (e.g. offline) just means the REK. BEM. column and
@@ -93,7 +98,7 @@ export default function Bemanning() {
 
     const rowsText = data.rows.map(r => {
       const n = kbanaNormals[r.kbana];
-      const rekBem = n ? rekommenderadBemanning(r.kbana, n.kolli, n.kart, n.helpall) : null;
+      const rekBem = n ? rekommenderadBemanning(r.kbana, n.kolli, n.kart, n.helpall, undefined, kringuppgifterPct) : null;
       return r.kbana + ": Planerad=" + r.bemanning +
         (rekBem != null
           ? ", Rek.=" + rekBem.toFixed(1) +
@@ -120,7 +125,8 @@ export default function Bemanning() {
       <PageHeader
         eyebrow="Bemanning"
         title="Personal per pass"
-        subtitle="Bemanningsstatus per K-bana och skift från Shelving-planeringsfilen."
+        subtitle={"Bemanningsstatus per K-bana och skift från Shelving-planeringsfilen."
+          + (kringuppgifterPct > 0 ? ` REK. BEM. inkl. ${kringuppgifterPct}% kringuppgifter (ställs in i Live).` : "")}
         actions={data && (
           <div className="file-meta">
             <div className="file-meta__name">{data.fileName}</div>
@@ -176,7 +182,7 @@ export default function Bemanning() {
             ]}>
               {data.rows.map((r, i) => {
                 const n = kbanaNormals[r.kbana];
-                const rekBem = n ? rekommenderadBemanning(r.kbana, n.kolli, n.kart, n.helpall) : null;
+                const rekBem = n ? rekommenderadBemanning(r.kbana, n.kolli, n.kart, n.helpall, undefined, kringuppgifterPct) : null;
                 const rekColor = rekBem == null ? C.dim : r.bemanning >= rekBem ? C.green : r.bemanning >= rekBem * 0.9 ? C.yellow : C.red;
                 return (
                   <tr key={i}>
