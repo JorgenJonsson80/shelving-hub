@@ -34,7 +34,7 @@ describe("classifyLocation", () => {
     expect(classifyLocation("K51-A-01")).toBe("K51");
     expect(classifyLocation("K52-X")).toBe("K52");
     expect(classifyLocation("K62-ZZZ")).toBe("K62");
-    expect(classifyLocation("K61-36-B")).toBe("K55"); // K61-36 retired 2026-09, folded into K55
+    expect(classifyLocation("K61-36-B")).toBe("K61-36"); // reinstated 2026-09 alongside the P3036 split
     expect(classifyLocation("K61-7-B")).toBe("K61-7");
   });
 
@@ -49,6 +49,18 @@ describe("classifyLocation", () => {
   it("resolves P3-prefix → K55", () => {
     // P3xx-yy format: substring(3,5) must be numeric for the function to proceed
     expect(classifyLocation("P3-60-A-12")).toBe("K55");
+  });
+
+  it("splits P3036 by plats-nummer: ≤13 → K55, ≥14 → K61-36", () => {
+    expect(classifyLocation("P3036-1")).toBe("K55");
+    expect(classifyLocation("P3036-13")).toBe("K55");
+    expect(classifyLocation("P3036-B13")).toBe("K55"); // "B" is just the same running number
+    expect(classifyLocation("P3036-B14")).toBe("K61-36");
+    expect(classifyLocation("P3036-20")).toBe("K61-36");
+  });
+
+  it("keeps other P3-blocks on plain K55 (P3036 split doesn't apply)", () => {
+    expect(classifyLocation("P3010-B14")).toBe("K55");
   });
 
   it("resolves P4 even lpl → K58, odd lpl → K56", () => {

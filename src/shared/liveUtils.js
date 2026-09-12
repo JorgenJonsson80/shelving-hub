@@ -55,11 +55,11 @@ export function classifyLocation(loc) {
   if (!loc) return null;
   const s = String(loc).trim().toUpperCase();
 
-  // K-prefix format (legacy). K61-36 (Stn 36) was permanently retired
-  // 2026-09 — that line's volume now belongs to K55, so any leftover
-  // legacy-format code still tagged K61-36 is remapped here too.
+  // K-prefix format (legacy). K61-36 (Stn 36) was retired 2026-09 and its
+  // volume folded into K55, then reinstated 2026-09 as its own line again
+  // once P3036 got split back out — see the P3036 split below.
   for (const kb of ["K61-36", "K61-7", "K51", "K52", "K53", "K55", "K56", "K58", "K59", "K60", "K62"]) {
-    if (s.startsWith(kb)) return kb === "K61-36" ? "K55" : kb;
+    if (s.startsWith(kb)) return kb;
   }
 
   // P-prefix format
@@ -74,11 +74,18 @@ export function classifyLocation(loc) {
   const lastDigit = lpl !== null ? lpl % 10 : null;
   const isEven = lastDigit !== null && lastDigit % 2 === 0;
   const isOdd  = lastDigit !== null && lastDigit % 2 === 1;
-  // P3 → allt till K55. Det fanns tidigare en uppdelningslogik som gav vissa
-  // P3-koder K61-36 istället (bevarad i git-historiken, commit a6b655e och
-  // tidigare) — borttagen helt (inte bara avstängd) sen K61-36 permanent
-  // lades ned 2026-09, det finns inget kvar att dela upp mot.
-  if (s.startsWith("P3")) return "K55";
+  // P3036 (stn 36) delas nu upp (K-banorna omorganiserade igen 2026-09):
+  // plats ≤13 → K55, plats ≥14 → K61-36. "B" framför platsnumret är bara en
+  // skrivvariant av samma löpnummer (B13 = 13, B14 = 14), inte en egen serie.
+  // Andra P3-block (om de förekommer) förblir K55 rakt av som innan.
+  if (s.startsWith("P3")) {
+    if (stn === 36) {
+      const posMatch = afterDash.match(/^B?(\d+)/);
+      const pos = posMatch ? parseInt(posMatch[1], 10) : null;
+      if (pos !== null) return pos <= 13 ? "K55" : "K61-36";
+    }
+    return "K55";
+  }
   if (s.startsWith("P101")) {
     if (isEven) return "K51";
     if (isOdd && stn >= 10 && stn <= 14) return "K52";
