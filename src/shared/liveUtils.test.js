@@ -34,7 +34,7 @@ describe("classifyLocation", () => {
     expect(classifyLocation("K51-A-01")).toBe("K51");
     expect(classifyLocation("K52-X")).toBe("K52");
     expect(classifyLocation("K62-ZZZ")).toBe("K62");
-    expect(classifyLocation("K61-36-B")).toBe("K61-36"); // reinstated 2026-09 alongside the P3036 split
+    expect(classifyLocation("K61-36-B")).toBe("K61-36"); // reinstated 2026-09 alongside the P3 split
     expect(classifyLocation("K61-7-B")).toBe("K61-7");
   });
 
@@ -46,27 +46,78 @@ describe("classifyLocation", () => {
     expect(classifyLocation("PH-123")).toBe("K63");
   });
 
-  it("resolves P3-prefix → K55", () => {
-    // P3xx-yy format: substring(3,5) must be numeric for the function to proceed
-    expect(classifyLocation("P3-60-A-12")).toBe("K55");
+  // P3 (Stn 36) → K55 eller K61-36. Riktiga koder har dubbelt bindestreck
+  // ("P3036--B-06-1BB"), så raden/platsen ligger på fasta teckenpositioner
+  // (T7/T8/T10–11) — inte i numret efter första bindestrecket, som är tomt.
+  it("splits P3036 K55 vs K61-36 by character position (real code format)", () => {
+    // K55: T7 = siffra, T8 = "A", eller T8 = "B" med plats 01–13
+    expect(classifyLocation("P3036--B-06-1BB")).toBe("K55");
+    expect(classifyLocation("P3036--B-01-1BB")).toBe("K55");
+    expect(classifyLocation("P3036--B-13-1BB")).toBe("K55");
+    expect(classifyLocation("P3036--A-13-2CA")).toBe("K55");
+    expect(classifyLocation("P3036--A-89-2CA")).toBe("K55"); // A-raden: alla platser
+    expect(classifyLocation("P3036-8-830-5BC")).toBe("K55");
+    expect(classifyLocation("P3036-4-427-5C")).toBe("K55");
+    // Allt annat i P3 som inte är K55 → K61-36
+    expect(classifyLocation("P3036--B-14-1BB")).toBe("K61-36"); // B-raden, plats ≥14
+    expect(classifyLocation("P3036--B-89-1BB")).toBe("K61-36");
+    expect(classifyLocation("P3036--R-08-3BA")).toBe("K61-36");
+    expect(classifyLocation("P3036--Q-89-5A")).toBe("K61-36");
+    expect(classifyLocation("P3036--V-17-1AA")).toBe("K61-36");
+    expect(classifyLocation("P3036--W-02-5BA")).toBe("K61-36");
   });
 
-  it("splits P3036 by plats-nummer: ≤13 → K55, ≥14 → K61-36", () => {
-    expect(classifyLocation("P3036-1")).toBe("K55");
-    expect(classifyLocation("P3036-13")).toBe("K55");
-    expect(classifyLocation("P3036-B13")).toBe("K55"); // "B" is just the same running number
-    expect(classifyLocation("P3036-B14")).toBe("K61-36");
-    expect(classifyLocation("P3036-20")).toBe("K61-36");
+  it("is case-insensitive and tolerates surrounding whitespace for P3036", () => {
+    expect(classifyLocation("  p3036--b-06-1bb ")).toBe("K55");
+    expect(classifyLocation("  p3036--r-08-3ba ")).toBe("K61-36");
   });
 
-  it("keeps other P3-blocks on plain K55 (P3036 split doesn't apply)", () => {
-    expect(classifyLocation("P3010-B14")).toBe("K55");
+  it("never lets a non-K55 P3 code fall back to K55", () => {
+    // Regression: the number after the first dash is empty in real codes
+    // ("P3036--…"), so a rule keyed on it silently returned K55 for everything.
+    for (const loc of ["P3036--R-08-3BA", "P3036--B-14-1BB", "P3036--Z-99-9ZZ", "P3036-"]) {
+      expect(classifyLocation(loc)).toBe("K61-36");
+    }
   });
 
   it("resolves P4 even lpl → K58, odd lpl → K56", () => {
     // lpl = first number after dash; even → K58, odd → K56
     expect(classifyLocation("P4-10-A-12")).toBe("K58");
     expect(classifyLocation("P4-11-A-12")).toBe("K56");
+  });
+});
+
+// Facit: de 24 validerade testfallen från regelmotorn (Shelving Hub-skillen,
+// references/regelmotor.md). Riktiga platskoder från Butema.
+describe("classifyLocation — validated regelmotor cases", () => {
+  it.each([
+    ["P1010-04--B-3-E",   "K51"],
+    ["P1011-15--D-3-A",   "K52"],
+    ["P1011-16--B-3-B",   "K51"],
+    ["P1024-60--C-3B",    "K56"],
+    ["P6060-02--D---",    "K58"],
+    ["P6063-32--B-7AB",   "K58"],
+    ["P6064-43--E-3-",    "K60"],
+    ["P6064-45--A-3-",    "K59"],
+    ["P7075-106-E-3AA",   "K61-7"],
+    ["P7074-94--C-3AB",   "K61-7"],
+    ["P7076-125-D-2-A",   "K60"],
+    ["P7071-15--D-3-A",   "K59"],
+    ["P7074-81--A-1-",    "K59"],
+    ["P7074-83--A-1-",    "K60"],
+    ["P7077-145-C-3-A",   "K60"],
+    ["P3036--R-08-3BA",   "K61-36"],
+    ["P3036--Q-89-5A",    "K61-36"],
+    ["P3036--V-17-1AA",   "K61-36"],
+    ["P3036--W-02-5BA",   "K61-36"],
+    ["P3036--B-06-1BB",   "K55"],
+    ["P3036--A-13-2CA",   "K55"],
+    ["P3036-8-830-5BC",   "K55"],
+    ["P3036-4-427-5C",    "K55"],
+    ["PD0001-XX",         "K62"],
+    ["PH126--C030-7A",    "K63"],
+  ])("classifyLocation(%s) → %s", (loc, expected) => {
+    expect(classifyLocation(loc)).toBe(expected);
   });
 });
 

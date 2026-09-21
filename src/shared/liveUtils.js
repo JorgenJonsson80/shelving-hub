@@ -57,7 +57,7 @@ export function classifyLocation(loc) {
 
   // K-prefix format (legacy). K61-36 (Stn 36) was retired 2026-09 and its
   // volume folded into K55, then reinstated 2026-09 as its own line again
-  // once P3036 got split back out — see the P3036 split below.
+  // once P3 got split back out — see the P3 split below.
   for (const kb of ["K61-36", "K61-7", "K51", "K52", "K53", "K55", "K56", "K58", "K59", "K60", "K62"]) {
     if (s.startsWith(kb)) return kb;
   }
@@ -74,17 +74,22 @@ export function classifyLocation(loc) {
   const lastDigit = lpl !== null ? lpl % 10 : null;
   const isEven = lastDigit !== null && lastDigit % 2 === 0;
   const isOdd  = lastDigit !== null && lastDigit % 2 === 1;
-  // P3036 (stn 36) delas nu upp (K-banorna omorganiserade igen 2026-09):
-  // plats ≤13 → K55, plats ≥14 → K61-36. "B" framför platsnumret är bara en
-  // skrivvariant av samma löpnummer (B13 = 13, B14 = 14), inte en egen serie.
-  // Andra P3-block (om de förekommer) förblir K55 rakt av som innan.
+  // P3 (Stn 36) delas i två K-banor (K-banorna omorganiserade igen 2026-09).
+  // Riktiga platskoder ser ut som "P3036--B-06-1BB", så det är tecknens
+  // POSITION som avgör, inte numret direkt efter första bindestrecket (det är
+  // ofta tomt: "P3036--B-…"). Tecknen räknas 1-baserat från "P":
+  // T7 = s[6], T8 = s[7], T10–T11 = s[9..10]. K55 om något av:
+  //   • T7 är en siffra                ("P3036-8-830-5BC")
+  //   • T8 = "A"                       ("P3036--A-13-2CA")
+  //   • T8 = "B" och T10–11 är 01–13   ("P3036--B-06-1BB")
+  // Allt annat i P3 som inte är K55 → K61-36 ("P3036--B-14-…", "P3036--R-08-…").
+  // Samma mönster som regelmotorn i Shelving Hub-skillen
+  // (references/regelmotor.md), som är facit för de validerade testfallen.
   if (s.startsWith("P3")) {
-    if (stn === 36) {
-      const posMatch = afterDash.match(/^B?(\d+)/);
-      const pos = posMatch ? parseInt(posMatch[1], 10) : null;
-      if (pos !== null) return pos <= 13 ? "K55" : "K61-36";
-    }
-    return "K55";
+    const t7 = s[6] || "", t8 = s[7] || "";
+    const slot = parseInt(s.substring(9, 11), 10);
+    const isK55 = /\d/.test(t7) || t8 === "A" || (t8 === "B" && slot >= 1 && slot <= 13);
+    return isK55 ? "K55" : "K61-36";
   }
   if (s.startsWith("P101")) {
     if (isEven) return "K51";
