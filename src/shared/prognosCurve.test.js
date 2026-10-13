@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   KURVA, getAndelKlar, calcPrognos, calcKartongPrognos, KART_MIN_ANDEL, KALLA_MIN_ANDEL,
-  blendKvar, buildEmpiriskKurva,
+  blendKvar, buildEmpiriskKurva, valjKurva, calcViktadPrognos, larPrognos,
 } from "./prognosCurve.js";
 
 // ── getAndelKlar ──────────────────────────────────────────────────────────
@@ -155,5 +155,96 @@ describe("buildEmpiriskKurva baseline", () => {
     const days = [{ total: 100, perTimme: [], perKalla: {}, perTimmeKalla: {} }];
     const kurva = buildEmpiriskKurva(days);
     expect(kurva.baseline.GM).toBeNull();
+  });
+});
+
+// ── valjKurva / calcViktadPrognos / larPrognos ─────────────────────────────
+
+// Synthetic complete day: `total` rows spread over hours 6–16 by `shape`
+// (weights per hour), all on GM so per-källa and TOTAL agree.
+function mkDay(datum, total, shape) {
+  const perTimme = Array(24).fill(0);
+  const sum = shape.reduce((s, v) => s + v, 0);
+  let left = total;
+  shape.forEach((w, i) => {
+    const n = i === shape.length - 1 ? left : Math.round(total * w / sum);
+    perTimme[6 + i] = n; left -= n;
+  });
+  const zero = () => Array(24).fill(0);
+  return {
+    datum, total, perTimme,
+    perKalla: { GM: total, Mezz: 0, ULC: 0, PL09: 0 },
+    perTimmeKalla: { GM: [...perTimme], Mezz: zero(), ULC: zero(), PL09: zero() },
+    rows: [{}],
+  };
+}
+
+const FLAT  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+const EARLY = [4, 4, 3, 2, 1, 1, 1, 1, 1, 1, 1];
+
+// 6 weeks of Mon–Fri: Mondays are big and front-loaded, other days flat.
+function mkWeeks(weeks = 6) {
+  const days = [];
+  const start = new Date("2026-08-03T12:00:00"); // a Monday
+  for (let w = 0; w < weeks; w++) {
+    for (let d = 0; d < 5; d++) {
+      const dt = new Date(start); dt.setDate(start.getDate() + w * 7 + d);
+      const datum = dt.toISOString().slice(0, 10);
+      days.push(d === 0 ? mkDay(datum, 2000, EARLY) : mkDay(datum, 1000, FLAT));
+    }
+  }
+  return days;
+}
+
+describe("valjKurva", () => {
+  it("falls back to KURVA with too little history", () => {
+    expect(valjKurva(mkWeeks(1).slice(0, 3), 1).tier).toBe("fast");
+  });
+
+  it("blends in the weekday's own shape and level before it has 5 samples", () => {
+    const hist = mkWeeks(3); // 3 Mondays
+    const res = valjKurva(hist, 1);
+    expect(res.tier).toBe("blandad");
+    expect(res.nVeckodag).toBe(3);
+    expect(res.kurva.baseline.TOTAL).toBeCloseTo(2000, 0);
+    // Monday curve is ahead of the pooled one early in the day.
+    const pooled = buildEmpiriskKurva(hist);
+    expect(getAndelKlar(res.kurva, "TOTAL", 9)).toBeGreaterThan(getAndelKlar(pooled, "TOTAL", 9));
+  });
+
+  it("uses the weekday tier once there are enough same-weekday days", () => {
+    expect(valjKurva(mkWeeks(6), 1).tier).toBe("veckodag");
+  });
+});
+
+describe("calcViktadPrognos", () => {
+  it("matches calcPrognos when the curve has no baseline", () => {
+    expect(calcViktadPrognos(KURVA, "TOTAL", 66, 12, {})).toEqual(calcPrognos(KURVA, "TOTAL", 66, 12));
+  });
+
+  it("leans on the baseline early and on the live ratio late (default ramp)", () => {
+    const kurva = { ...KURVA, baseline: { TOTAL: 1000 } };
+    const early = calcViktadPrognos(kurva, "TOTAL", 10, 6.5, {});
+    expect(early.wLive).toBeLessThan(0.5);
+    expect(Math.abs(early.estTotal - 1000)).toBeLessThan(200);
+    const late = calcViktadPrognos(kurva, "TOTAL", 660, 12, {});
+    expect(late.wLive).toBe(1);
+    expect(late.estTotal).toBe(1000);
+  });
+});
+
+describe("larPrognos", () => {
+  it("backtests walk-forward and beats the old model on the odd weekday", () => {
+    const { vikter, traffsakerhet } = larPrognos(mkWeeks(8));
+    expect(vikter.TOTAL[10].n).toBeGreaterThan(0);
+    const mon = traffsakerhet[1][10];
+    expect(mon.n).toBeGreaterThan(0);
+    expect(mon.ny).toBeLessThan(mon.gammal);
+  });
+
+  it("ignores incomplete days", () => {
+    const days = mkWeeks(2);
+    days[0].perTimme.fill(0, 16);
+    expect(() => larPrognos(days)).not.toThrow();
   });
 });

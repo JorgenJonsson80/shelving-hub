@@ -169,3 +169,206 @@ export function blendKvar(sett, andelKlar, minAndel, baselineTotal) {
 // as 0/no signal — see blendKvar's comment for why the latter made Live's
 // ETA read as queue-only for most of the morning.
 export const KALLA_MIN_ANDEL = 0.30;
+
+// ── Veckodagsviktad kurva + självlärd viktning mot historiskt snitt ─────────
+//
+// Bug report 2026-10-13: the self-learning forecast was off by ~10–20%, worst
+// on Mondays and Fridays. Two structural causes, both fixed below:
+//
+// 1. Curve choice was all-or-nothing — the weekday's own curve only once 5+
+//    complete same-weekday days existed, otherwise one curve pooled across
+//    every weekday. Mondays (weekend backlog) and Fridays have their own
+//    shape, so the pooled curve systematically misjudged "how much of the
+//    day is done" on exactly those days. valjKurva instead blends the
+//    weekday's curve with the pooled one, weighted by how many weekday
+//    samples there are, and uses only recent days so seasonal drift in
+//    volume doesn't linger for 120 days.
+//
+// 2. The estimate was pure sett / andelKlar for the whole day past the 0.30
+//    floor. That ratio inherits every bit of the day's shape noise — a GM
+//    wave arriving an hour early or late moves the guess by the same %.
+//    calcViktadPrognos blends it with a "rest of day is normal" estimate
+//    (sett + weekday baseline × (1 − andelKlar)), with the blend weight per
+//    källa and per hour learned from how both estimates actually performed
+//    on past days (larPrognos — a walk-forward backtest, so each day is only
+//    scored against what was known before it).
+
+export const MAX_VECKODAG_DAGAR = 8;
+export const MAX_POOL_DAGAR = 30;
+// Weekday weight = n / (n + VECKODAG_KRYMP): 1 day → 33%, 4 → 67%, 8 → 80%.
+export const VECKODAG_KRYMP = 2;
+export const BACKTEST_TIMMAR = [7, 8, 9, 10, 11, 12, 13, 14, 15];
+// Learned weights are shrunk towards defaultVikt with this many pseudo-days,
+// so a handful of backtested days can't swing the blend on their own.
+export const VIKT_KRYMP = 8;
+
+const KALLOR = ["GM", "Mezz", "ULC", "PL09", "TOTAL"];
+
+export function veckodagFor(datum) {
+  return new Date(datum + "T12:00:00").getDay();
+}
+
+function blandaKurvor(a, b, w, wBase) {
+  const out = { timmar: a.timmar, baseline: {} };
+  for (const src of KALLOR) {
+    out[src] = a[src].map((v, i) => w * v + (1 - w) * b[src][i]);
+    const ba = a.baseline?.[src], bb = b.baseline?.[src];
+    out.baseline[src] = ba != null && bb != null ? wBase * ba + (1 - wBase) * bb : (ba ?? bb ?? null);
+  }
+  return out;
+}
+
+// `history` = complete days before today. Returns the same shape Prognos.jsx's
+// effectiveKurva always had ({ kurva, tier, n, days }) plus nVeckodag.
+export function valjKurva(history, wd) {
+  const sorted = [...history].sort((a, b) => a.datum.localeCompare(b.datum));
+  const wdDays = sorted.filter(d => veckodagFor(d.datum) === wd).slice(-MAX_VECKODAG_DAGAR);
+  const pool = sorted.slice(-MAX_POOL_DAGAR);
+  if (pool.length < MIN_SAMPLES_POOLAD) return { kurva: KURVA, tier: "fast", n: 0, nVeckodag: 0, days: [] };
+
+  const pooled = buildEmpiriskKurva(pool);
+  if (!wdDays.length) return { kurva: pooled, tier: "poolad", n: pool.length, nVeckodag: 0, days: pool };
+
+  const w = wdDays.length / (wdDays.length + VECKODAG_KRYMP);
+  // Volume level differs more between weekdays than shape does (Monday's
+  // total isn't a pooled-average day's), so the baseline trusts the weekday's
+  // own mean as soon as there are two of them to average.
+  const wBase = wdDays.length >= 2 ? 1 : w;
+  const kurva = blandaKurvor(buildEmpiriskKurva(wdDays), pooled, w, wBase);
+  const tier = wdDays.length >= MIN_SAMPLES_VECKODAG ? "veckodag" : "blandad";
+  return { kurva, tier, n: pool.length, nVeckodag: wdDays.length, days: tier === "veckodag" ? wdDays : pool };
+}
+
+// The pre-2026-10-13 selection, kept only so larPrognos can show old vs new
+// accuracy side by side on the same days.
+export function valjKurvaGammal(history, wd) {
+  const wdDays = history.filter(d => veckodagFor(d.datum) === wd);
+  if (wdDays.length >= MIN_SAMPLES_VECKODAG) return { kurva: buildEmpiriskKurva(wdDays) };
+  if (history.length >= MIN_SAMPLES_POOLAD) return { kurva: buildEmpiriskKurva(history) };
+  return { kurva: KURVA };
+}
+
+// Before anything is learned: same ramp blendKvar has always used — baseline
+// at the start of the day, fully live once andelKlar reaches the floor.
+export function defaultVikt(andelKlar) {
+  return Math.max(0, Math.min(1, andelKlar / KALLA_MIN_ANDEL));
+}
+
+function viktVid(vikter, kalla, t, andelKlar) {
+  const w0 = defaultVikt(andelKlar);
+  const perT = vikter?.[kalla];
+  if (!perT) return w0;
+  const shrunk = (T) => {
+    const v = perT[T];
+    return v ? (v.n * v.w + VIKT_KRYMP * w0) / (v.n + VIKT_KRYMP) : null;
+  };
+  const lo = Math.floor(t), hi = Math.ceil(t);
+  const a = shrunk(lo), b = shrunk(hi);
+  if (a == null && b == null) return w0;
+  if (a == null) return b;
+  if (b == null || lo === hi) return a;
+  return a + (b - a) * (t - lo);
+}
+
+function blendEst(sett, andelKlar, base, w) {
+  const baseEst = sett + base * (1 - andelKlar);
+  if (andelKlar <= 0) return baseEst;
+  return w * (sett / andelKlar) + (1 - w) * baseEst;
+}
+
+// Drop-in for calcPrognos when the curve has a baseline (real history).
+// Without one there's nothing to blend against → plain calcPrognos.
+export function calcViktadPrognos(kurva, kalla, sett, t, vikter) {
+  const base = kurva.baseline?.[kalla];
+  if (base == null) return calcPrognos(kurva, kalla, sett, t);
+  const andelKlar = getAndelKlar(kurva, kalla, t);
+  const wLive = viktVid(vikter, kalla, t, andelKlar);
+  const est = blendEst(sett, andelKlar, base, wLive);
+  return { estTotal: Math.round(est), kvar: Math.round(Math.max(0, est - sett)), andelKlar, wLive };
+}
+
+function settFore(day, kalla, T) {
+  const hourly = kalla === "TOTAL" ? day.perTimme : day.perTimmeKalla?.[kalla];
+  if (!Array.isArray(hourly)) return null;
+  let s = 0;
+  for (let h = 0; h < T && h < hourly.length; h++) s += hourly[h] || 0;
+  return s;
+}
+
+function viktFranSummor(acc) {
+  const out = {};
+  for (const [kalla, perT] of Object.entries(acc)) {
+    out[kalla] = {};
+    for (const [T, s] of Object.entries(perT)) {
+      const vl = s.ll / s.n, vb = s.bb / s.n, c = s.lb / s.n;
+      const denom = vl + vb - 2 * c;
+      // Minimum-variance combination of two correlated estimates.
+      const w = denom > 1e-9 ? (vb - c) / denom : 0.5;
+      out[kalla][T] = { w: Math.max(0, Math.min(1, w)), n: s.n };
+    }
+  }
+  return out;
+}
+
+// Walk-forward backtest over stored days: for each complete day, rebuild the
+// curve from only the days before it, pretend it's T:00 for each T in
+// BACKTEST_TIMMAR, and record how wrong both the live ratio and the
+// baseline estimate were. Returns blend weights learned from all of it, and
+// per-weekday/hour accuracy of the old method vs the new one (the new one
+// scored with weights learned from earlier days only — no peeking).
+export function larPrognos(days) {
+  const complete = days.filter(d => d.total > 0 && dagenArKomplett(d))
+    .sort((a, b) => a.datum.localeCompare(b.datum));
+  const acc = {};
+  const fel = {}; // wd → T → { gammal: [], ny: [] }
+
+  for (let i = 0; i < complete.length; i++) {
+    const day = complete[i];
+    const history = complete.slice(0, i);
+    if (history.length < MIN_SAMPLES_POOLAD) continue;
+    const wd = veckodagFor(day.datum);
+    const { kurva } = valjKurva(history, wd);
+    const gammal = valjKurvaGammal(history, wd).kurva;
+    const vikter = viktFranSummor(acc);
+    const nyaSummor = [];
+
+    for (const kalla of KALLOR) {
+      const actual = kalla === "TOTAL" ? day.total : day.perKalla?.[kalla];
+      const base = kurva.baseline?.[kalla];
+      if (!actual || base == null) continue;
+      for (const T of BACKTEST_TIMMAR) {
+        const sett = settFore(day, kalla, T);
+        if (sett == null) continue;
+        const andel = getAndelKlar(kurva, kalla, T);
+        if (andel <= 0) continue;
+        const eL = (sett / andel - actual) / actual;
+        const eB = (sett + base * (1 - andel) - actual) / actual;
+        nyaSummor.push({ kalla, T, eL, eB });
+
+        if (kalla === "TOTAL") {
+          const ny = blendEst(sett, andel, base, viktVid(vikter, kalla, T, andel));
+          const andelG = getAndelKlar(gammal, kalla, T);
+          if (andelG <= 0) continue;
+          const cell = ((fel[wd] ??= {})[T] ??= { gammal: [], ny: [] });
+          cell.gammal.push(Math.abs(sett / andelG - actual) / actual * 100);
+          cell.ny.push(Math.abs(ny - actual) / actual * 100);
+        }
+      }
+    }
+    // Added only after the day is scored, so it never grades itself.
+    for (const { kalla, T, eL, eB } of nyaSummor) {
+      const s = ((acc[kalla] ??= {})[T] ??= { n: 0, ll: 0, bb: 0, lb: 0 });
+      s.n++; s.ll += eL * eL; s.bb += eB * eB; s.lb += eL * eB;
+    }
+  }
+
+  const snitt = (a) => a.reduce((s, v) => s + v, 0) / a.length;
+  const traffsakerhet = {};
+  for (const [wd, perT] of Object.entries(fel)) {
+    traffsakerhet[wd] = {};
+    for (const [T, c] of Object.entries(perT)) {
+      traffsakerhet[wd][T] = { gammal: snitt(c.gammal), ny: snitt(c.ny), n: c.ny.length };
+    }
+  }
+  return { vikter: viktFranSummor(acc), traffsakerhet };
+}

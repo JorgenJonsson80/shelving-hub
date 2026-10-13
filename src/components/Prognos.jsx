@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { Fragment, useState, useEffect, useMemo } from "react";
 import { C } from "../shared/theme";
 import { Alert, DeltaChip, Dropzone, NormalBadge, Panel } from "../shared/components";
 import { parsePFExport } from "../shared/parsers";
@@ -8,8 +8,8 @@ import { fetchLedtidObservations } from "../shared/ledtidDb";
 import { fetchHistorikDays, buildKbanaNormals } from "../shared/kbanaNormals";
 import { useSetting } from "../shared/useSetting";
 import {
-  KURVA, MIN_SAMPLES_VECKODAG, MIN_SAMPLES_POOLAD, MIN_SAMPLES_MANAD, KALLA_MIN_ANDEL,
-  dagenArKomplett, buildEmpiriskKurva, getAndelKlar, calcPrognos, calcKartongPrognos, blendKvar,
+  MIN_SAMPLES_MANAD, KALLA_MIN_ANDEL,
+  dagenArKomplett, valjKurva, larPrognos, getAndelKlar, calcViktadPrognos, calcKartongPrognos, blendKvar,
 } from "../shared/prognosCurve";
 
 function toMin(str) {
@@ -24,6 +24,8 @@ function fmtHM(mins) {
 }
 
 const VECKODAGAR = ["Sön","Mån","Tis","Ons","Tor","Fre","Lör"];
+// Klockslag som visas i självtestet (en delmängd av BACKTEST_TIMMAR).
+const TRAFF_TIMMAR = [8, 10, 12, 14];
 
 // Fast identitetsfärg per källa — samma dot+textfärg varhelst källan visas,
 // så man känner igen GM/Mezz/ULC/PL09 på färgen istället för att läsa texten.
@@ -147,22 +149,44 @@ export default function Prognos() {
     fetchHistorikDays().then(setHistorikDays).catch(() => {});
   }, []);
 
-  const nowHour = now.getHours();
-  const nowT = nowHour + now.getMinutes() / 60;
+  // The PF file is a snapshot: its "sett" stops growing the moment it's
+  // uploaded, but the clock keeps going. Projecting a 09:00 file against the
+  // 11:00 point on the curve credits two hours of progress that never showed
+  // up in the data and drags every estimate (and Live's shared kvar) low —
+  // part of the 2026-10-13 accuracy report. So the curve is read at the
+  // file's upload time, never later.
+  const clockT = now.getHours() + now.getMinutes() / 60;
+  const nowT = todayData?.snapshotT != null ? Math.min(clockT, todayData.snapshotT) : clockT;
+  const nowHour = Math.floor(nowT);
+  const tidStr = fmtHM(Math.round(nowT * 60));
+  const todayWd = now.getDay();
+  const wdNamn = VECKODAGAR[todayWd].toLowerCase();
 
   const effectiveKurva = useMemo(() => {
-    const todayWd = now.getDay();
     const history = storedDays.filter(d => d.rows?.length > 0 && d.datum !== todayData?.datum && dagenArKomplett(d));
-    const veckodagDays = history.filter(d => new Date(d.datum + "T12:00:00").getDay() === todayWd);
+    return valjKurva(history, todayWd);
+  }, [storedDays, todayData, todayWd]);
 
-    if (veckodagDays.length >= MIN_SAMPLES_VECKODAG) {
-      return { kurva: buildEmpiriskKurva(veckodagDays), tier: "veckodag", n: veckodagDays.length, days: veckodagDays };
-    }
-    if (history.length >= MIN_SAMPLES_POOLAD) {
-      return { kurva: buildEmpiriskKurva(history), tier: "poolad", n: history.length, days: history };
-    }
-    return { kurva: KURVA, tier: "fast", n: 0, days: [] };
-  }, [storedDays, todayData, now]);
+  // Learned blend weights + old-vs-new accuracy per weekday. Only depends on
+  // the stored history, so this doesn't rerun on every minute tick.
+  const larande = useMemo(
+    () => larPrognos(storedDays.filter(d => d.datum !== todayData?.datum)),
+    [storedDays, todayData]
+  );
+
+  // Mån–Fre first, then any weekend days that have data.
+  const traffRader = [1, 2, 3, 4, 5, 6, 0]
+    .filter(wd => larande.traffsakerhet[wd])
+    .map(wd => {
+      const perT = larande.traffsakerhet[wd];
+      return {
+        wd,
+        celler: {
+          n: Math.max(...Object.values(perT).map(c => c.n)),
+          vals: TRAFF_TIMMAR.map(T => perT[T] ?? null),
+        },
+      };
+    });
 
   // Pallar (helpall) har ingen tidsstämplad rad-för-rad-data som PF/kartonger
   // — Historik-exporten är en dagstotal, inte en logg. Går alltså inte att
@@ -188,7 +212,8 @@ export default function Prognos() {
     parsePFExport(f).then(async (days) => {
       if (!days.length) { setErr("Inga rader hittades i filen."); return; }
       const best = [...days].sort((a, b) => b.total - a.total)[0];
-      setTodayData(best);
+      const up = new Date();
+      setTodayData({ ...best, snapshotT: up.getHours() + up.getMinutes() / 60 });
       // Store every day with real rows for K-bana history / self-learning curve.
       const toUpsert = days.filter(d => d.rows?.length > 0);
       for (const d of toUpsert) {
@@ -203,14 +228,15 @@ export default function Prognos() {
     const { perKalla, total, perTimme } = todayData;
     const kurva = effectiveKurva.kurva;
 
-    const totalProg = calcPrognos(kurva, "TOTAL", total, nowT);
+    const v = larande.vikter;
+    const totalProg = calcViktadPrognos(kurva, "TOTAL", total, nowT, v);
     const andelKlarTotal = getAndelKlar(kurva, "TOTAL", nowT);
     const klartPct = Math.round(andelKlarTotal * 100);
 
-    const gmProg   = calcPrognos(kurva, "GM",   perKalla.GM,   nowT);
-    const mezzProg = calcPrognos(kurva, "Mezz", perKalla.Mezz, nowT);
-    const ulcProg  = calcPrognos(kurva, "ULC",  perKalla.ULC,  nowT);
-    const pl09Prog = calcPrognos(kurva, "PL09", perKalla.PL09, nowT);
+    const gmProg   = calcViktadPrognos(kurva, "GM",   perKalla.GM,   nowT, v);
+    const mezzProg = calcViktadPrognos(kurva, "Mezz", perKalla.Mezz, nowT, v);
+    const ulcProg  = calcViktadPrognos(kurva, "ULC",  perKalla.ULC,  nowT, v);
+    const pl09Prog = calcViktadPrognos(kurva, "PL09", perKalla.PL09, nowT, v);
 
     const gmLåg = gmProg.kvar != null ? Math.round(gmProg.kvar * 0.75) : null;
     const gmHög = gmProg.kvar != null ? Math.round(gmProg.kvar * 1.25) : null;
@@ -245,9 +271,10 @@ export default function Prognos() {
       kartonger: { sett: kartSett, kvar: kartKvar, estTotal: kartEstTotal, blended: kartBlended },
       perTimme,
       tooEarly, morningWarn,
-      kurvaTier: effectiveKurva.tier, kurvaN: effectiveKurva.n,
+      kurvaTier: effectiveKurva.tier, kurvaN: effectiveKurva.n, kurvaNVeckodag: effectiveKurva.nVeckodag,
+      liveVikt: totalProg.wLive,
     };
-  }, [todayData, nowT, nowHour, effectiveKurva]);
+  }, [todayData, nowT, nowHour, effectiveKurva, larande]);
 
   const todayCheckpoint = todayData ? checkpoints[todayData.datum] : null;
 
@@ -348,12 +375,18 @@ export default function Prognos() {
     // days effectiveKurva's curve was built from) instead, so a K-bana still
     // gets a real forecasted-kvar redistributed to it early in the morning
     // rather than 0 ("queue-only") until the källa crosses the floor.
+    // With a baseline, forecast.*.kvar is already the learned blend from
+    // calcViktadPrognos (which starts out on the same ramp). Without one it's
+    // the raw ratio, so keep the old floor guard for that case.
     const srcBaseline = effectiveKurva.kurva.baseline;
+    const kvarFor = (src, f) => srcBaseline?.[src] != null
+      ? f.kvar ?? 0
+      : blendKvar(f.sett, f.andelKlar, KALLA_MIN_ANDEL, null);
     const kvarSrc = {
-      GM:   blendKvar(forecast.gm.sett,   forecast.gm.andelKlar,   KALLA_MIN_ANDEL, srcBaseline?.GM),
-      Mezz: blendKvar(forecast.mezz.sett, forecast.mezz.andelKlar, KALLA_MIN_ANDEL, srcBaseline?.Mezz),
-      ULC:  blendKvar(forecast.ulc.sett,  forecast.ulc.andelKlar,  KALLA_MIN_ANDEL, srcBaseline?.ULC),
-      PL09: blendKvar(forecast.pl09.sett, forecast.pl09.andelKlar, KALLA_MIN_ANDEL, srcBaseline?.PL09),
+      GM:   kvarFor("GM",   forecast.gm),
+      Mezz: kvarFor("Mezz", forecast.mezz),
+      ULC:  kvarFor("ULC",  forecast.ulc),
+      PL09: kvarFor("PL09", forecast.pl09),
     };
 
     // Median lead time per K-bana from real Ledtid.jsx observations (Supabase)
@@ -422,7 +455,7 @@ export default function Prognos() {
     setCheckpoints(prev => ({
       ...prev,
       [todayData.datum]: {
-        mins: now.getHours() * 60 + now.getMinutes(),
+        mins: Math.round(nowT * 60),
         sett: forecast.sett,
         estTotal: forecast.totalEst,
         kartSett: forecast.kartonger.sett,
@@ -442,13 +475,13 @@ export default function Prognos() {
     if (!kbanaForecast || !todayData) return;
     setSharedKbanaForecast({
       datum: todayData.datum,
-      mins: now.getHours() * 60 + now.getMinutes(),
+      mins: Math.round(nowT * 60),
       byKb: Object.fromEntries(kbanaForecast.map(k => [k.kb, k.exp])),
       kartByKb: Object.fromEntries(
         kbanaForecast.filter(k => k.expKart != null).map(k => [k.kb, k.expKart])
       ),
     });
-  }, [kbanaForecast, todayData, now, setSharedKbanaForecast]);
+  }, [kbanaForecast, todayData, nowT, setSharedKbanaForecast]);
 
   const multiFill = useMemo(() => {
     if (!todayData?.rows) return null;
@@ -531,8 +564,6 @@ export default function Prognos() {
     return flags.sort((a, b) => b.z - a.z).slice(0, 5);
   }, [todayData, storedDays]);
 
-  const tidStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-
   return (
     <div className="dashboard-page">
       <div className="page-header">
@@ -568,13 +599,17 @@ export default function Prognos() {
             <span style={{ color: C.text }}>Sett hittills: <strong>{forecast.sett}</strong> PF</span>
             <span style={{ color: C.dim }}>·</span>
             <span style={{ color: C.textDim }}>kl {tidStr}</span>
+            {clockT - nowT > 0.25 && (
+              <span style={{ color: C.yellow }}>(filen är från kl {tidStr} — ladda upp en ny för färsk prognos)</span>
+            )}
             <span style={{ color: C.dim }}>·</span>
             <span style={{ color: forecast.klartPct < 20 ? C.red : forecast.klartPct < 60 ? C.yellow : C.green, fontWeight: 700 }}>
               {forecast.klartPct}% av dagen
             </span>
             <span style={{ marginLeft: "auto", fontSize: 11, color: C.dim }}>
-              {forecast.kurvaTier === "veckodag" && `${forecast.kurvaN} ${VECKODAGAR[now.getDay()].toLowerCase()}dagar mot självlärande kurva`}
-              {forecast.kurvaTier === "poolad" && `${forecast.kurvaN} dagar totalt mot självlärande kurva (för få ${VECKODAGAR[now.getDay()].toLowerCase()}dagar ännu)`}
+              {forecast.kurvaTier === "veckodag" && `${forecast.kurvaNVeckodag} ${wdNamn}dagar + ${forecast.kurvaN} senaste dagarna mot självlärande kurva`}
+              {forecast.kurvaTier === "blandad" && `${forecast.kurvaNVeckodag} ${wdNamn}dag(ar) vägt mot ${forecast.kurvaN} senaste dagarna (fler ${wdNamn}dagar ger säkrare kurva)`}
+              {forecast.kurvaTier === "poolad" && `${forecast.kurvaN} dagar totalt mot självlärande kurva (inga ${wdNamn}dagar ännu)`}
               {forecast.kurvaTier === "fast" && "Standardkurva (för lite historik ännu)"}
             </span>
           </div>
@@ -607,9 +642,11 @@ export default function Prognos() {
                 </div>
                 <div style={{ fontSize: 11, color: C.dim, marginTop: 6 }}>
                   PF och kartonger: {forecast.sett} sett hittills kl {tidStr}, projicerat mot{" "}
-                  {forecast.kurvaTier === "veckodag" && `${forecast.kurvaN} tidigare ${VECKODAGAR[now.getDay()].toLowerCase()}dagars kurva`}
+                  {forecast.kurvaTier === "veckodag" && `${forecast.kurvaNVeckodag} tidigare ${wdNamn}dagars kurva`}
+                  {forecast.kurvaTier === "blandad" && `${forecast.kurvaNVeckodag} ${wdNamn}dag(ar) blandat med ${forecast.kurvaN} dagars poolad kurva`}
                   {forecast.kurvaTier === "poolad" && `${forecast.kurvaN} dagars poolad kurva`}
-                  {forecast.kurvaTier === "fast" && "en standardkurva"}.
+                  {forecast.kurvaTier === "fast" && "en standardkurva"}
+                  {forecast.liveVikt != null && forecast.liveVikt < 0.995 && `, vägt ${Math.round(forecast.liveVikt * 100)}/${100 - Math.round(forecast.liveVikt * 100)} mot ett normalt ${wdNamn}dagssnitt`}.
                   {pallForecast && <> Pallar: rent historiskt snitt ({pallForecast.n} {pallForecast.tier === "veckodag" ? `${VECKODAGAR[now.getDay()].toLowerCase()}dagar` : "dagar totalt"}) — påverkas inte av dagens siffror eller klockan.</>}
                 </div>
               </div>
@@ -659,6 +696,29 @@ export default function Prognos() {
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {traffRader.length > 0 && (
+                <div style={{ marginTop: facit.length ? 16 : 0 }}>
+                  <div style={{ fontSize: 11, color: C.dim, marginBottom: 8 }}>
+                    Självtest på sparad historik — snittfel på dagstotalen om prognosen gjorts vid klockslaget (gammal modell inom parentes):
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: `56px repeat(${TRAFF_TIMMAR.length}, 1fr)`, gap: "4px 8px", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+                    <span />
+                    {TRAFF_TIMMAR.map(T => <span key={T} style={{ color: C.dim, fontSize: 11 }}>kl {String(T).padStart(2, "0")}</span>)}
+                    {traffRader.map(({ wd, celler }) => (
+                      <Fragment key={wd}>
+                        <span style={{ color: wd === todayWd ? C.text : C.textDim, fontWeight: wd === todayWd ? 700 : 400 }}>{VECKODAGAR[wd]} <span style={{ color: C.dim, fontSize: 10 }}>{celler.n}d</span></span>
+                        {celler.vals.map((c, i) => c
+                          ? <span key={i}>
+                              <strong style={{ color: c.ny <= 5 ? C.green : c.ny <= 10 ? C.yellow : C.red }}>±{c.ny.toFixed(0)}%</strong>
+                              <span style={{ color: C.dim, fontSize: 10, marginLeft: 4 }}>({c.gammal.toFixed(0)}%)</span>
+                            </span>
+                          : <span key={i} style={{ color: C.dim }}>–</span>)}
+                      </Fragment>
+                    ))}
+                  </div>
                 </div>
               )}
             </Panel>
